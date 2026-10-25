@@ -255,6 +255,17 @@ function walkable(t, enemy){
   if (t.type === 'etrench') return !!enemy;
   return ['ground','crater','trench','dug','floor','road','path'].includes(t.type);
 }
+function quietSpot(gx, gy){
+  /* the step-aside: a hot tile trades its talk to the quietest ground near */
+  const o = tileAt(gx, gy); if (!o) return [gx, gy];
+  if (!sim.busyCost || sim.busyCost[gy * MW + gx] < 25) return [gx, gy];
+  let best = null, bestScore = 1e9;
+  for (let r = 1; r <= 3; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++){
+    if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+    const n = tileAt(gx + dx, gy + dy); if (!n || !walkable(n, false) || n.z !== o.z || exposedTile(n)) continue;
+    const score = ((n.type === 'dug' || n.type === 'floor') ? 0 : 100) + sim.busyCost[n.gy * MW + n.gx] * 2 + r * 6;
+    if (score < bestScore){ bestScore = score; best = [n.gx, n.gy]; } }
+  return best || [gx, gy]; }
 function findPath(sx, sy, tx, ty, opts){
   opts = opts || {};
   const start = tileAt(sx, sy), goal = tileAt(tx, ty);
@@ -285,6 +296,8 @@ function tileCost(t, trenchRoad){
     case 'ground': c = 260; break;
     default: c = 300; }
   if (t.rubble > 0.3) c += 140;
+  if (sim && sim.busyCost && (t.type === 'trench' || t.type === 'dug' || t.type === 'floor' || t.type === 'path' || t.type === 'road'))
+    c += sim.busyCost[t.gy * MW + t.gx];   /* Phase 2: the lane remembers feet */
   if (sim && sim.wireSet && sim.wireSet.has(t.gx + ',' + t.gy)) c += 700;
   for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
     const n = tileAt(t.gx + dx, t.gy + dy);
@@ -660,6 +673,8 @@ function goTo(s, gx, gy, opts){
   return true;
 }
 function soldierMove(s, dt){
+  const bk = Math.floor(s.fy) * MW + Math.floor(s.fx);
+  if (bk !== s._bt){ s._bt = bk; if (sim.busy && bk >= 0 && bk < sim.busy.length) sim.busy[bk] = Math.min(255, sim.busy[bk] + 1); }
   if (s.climbing){ const c = s.climbing; c.t -= dt;
     s.z = lerp(c.z1, c.z0, Math.max(0, c.t / c.dur));
     s.phase += dt * 5;
@@ -2392,6 +2407,9 @@ function directorTick(dt){
     .sort((x, y) => (Math.hypot(x.fx - a.fx, x.fy - a.fy) - scarfAffinity(a, x) * 0.8) - (Math.hypot(y.fx - a.fx, y.fy - a.fy) - scarfAffinity(a, y) * 0.8))[0];
   if (near && rng() < 0.82){
     const dur = rr(14, 28);
+    const at0 = tileAt(Math.floor(a.fx), Math.floor(a.fy));
+    if (at0 && sim.busyCost && sim.busyCost[at0.gy * MW + at0.gx] >= 25){ const qs = quietSpot(at0.gx, at0.gy);
+      if (qs[0] !== at0.gx || qs[1] !== at0.gy) goTo(a, qs[0], qs[1], {}); }   /* talk steps out of the lane first */
     a.vig = null; near.vig = null;
     a.talk = { with: near.id, t: dur }; near.talk = { with: a.id, t: dur };
     a.letterT = 0; near.letterT = 0;
@@ -3108,7 +3126,7 @@ function updateSoldier(s, dt){
   /* talk upkeep: face each other, gesture, drift close if apart */
   if (s.talk){ const o = sim.soldiers.find(x => x.id === s.talk.with);
     if (!o || o.dead || o.state === 'down' || o.state === 'sleep') s.talk = null;
-    else { s.talk.t -= dt; faceToward(s, o.fx, o.fy);
+    else { if (!s.path && !o.path) s.talk.t -= dt; faceToward(s, o.fx, o.fy);
       const d = Math.hypot(o.fx - s.fx, o.fy - s.fy);
       if (d > 3.4) s.talk = null;
       else if (d > 2.2 && !s.path) goTo(s, Math.floor(o.fx), Math.floor(o.fy), {});
@@ -3837,7 +3855,10 @@ function socialTick(dt){
           .filter(x => x.near.length >= 1).sort((x, y) => y.near.length - x.near.length);
         if (scored.length){ const { a, near } = scored[0];
           const mates = near.sort((x, y) => Math.hypot(x.fx - a.fx, x.fy - a.fy) - Math.hypot(y.fx - a.fx, y.fy - a.fy)).slice(0, 3);
-          startGather(rng() < 0.45 ? 'cards' : 'talk', [Math.floor(a.fx), Math.floor(a.fy)], [a].concat(mates), rr(18, 36)); } } } } }
+          const gc = [Math.floor(a.fx), Math.floor(a.fy)];
+          const gt0 = tileAt(gc[0], gc[1]);
+          if (gt0 && sim.busyCost && sim.busyCost[gt0.gy * MW + gt0.gx] >= 25){ const qs = quietSpot(gt0.gx, gt0.gy); gc[0] = qs[0]; gc[1] = qs[1]; }
+          startGather(rng() < 0.45 ? 'cards' : 'talk', gc, [a].concat(mates), rr(18, 36)); } } } } }
 function enemyLifeTick(dt){
   const h = sim.hour;
   const standTo = (h > 5.65 && h < 6.75) || (h > 18.7 && h < 19.7);
@@ -3865,6 +3886,10 @@ function enemyLifeTick(dt){
       if (o){ const dur = rr(10, 20); s.talk = { with: o.id, t: dur }; o.talk = { with: s.id, t: dur }; } } });
 }
 function updateSystems(dt){
+  /* Phase 2: snapshot the busy layer on an interval, decay the counts */
+  sim.busyT = (sim.busyT ?? 0) - dt;
+  if (sim.busyT <= 0 && sim.busy){ sim.busyT = 5; const B = sim.busy, BC = sim.busyCost;
+    for (let i = 0; i < B.length; i++){ BC[i] = Math.min(30, B[i] * 3); B[i] = B[i] - (B[i] >> 2); } }
   enemyWorksTick(dt); enemyLifeTick(dt);
   socialTick(dt); leaderTick(dt); flareTick(dt);
   /* pacing: the war breathes. Stand-to hours are loud, midday is slow, night is tense and low. */
@@ -4744,6 +4769,7 @@ function newSim(planetName, seedStr){
     cart: { active: false, fx: -6, dir: 1, t: rr(24, 44), phase: 'gone', cargo: null, vCur: 0 },
     saw: { active: false, pair: [], t: 0, stroke: 0 },
     social: [], socialT: 5, rumDay: -1, mailT: 260,
+    busy: new Int16Array(MW * MH), busyCost: new Uint8Array(MW * MH), busyT: 0,
     flare: [0, 1, 2].map(() => ({ mode: 'quiet', t: rr(20, 45), next: rr(4, 18) })), contact: [0.2, 0.2, 0.2],
     confuse: [0, 0, 0], leaderT: 0, officerT: 0,
     plane: { active: false, fx: -8, fy: 8 },
