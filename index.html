@@ -242,8 +242,7 @@ function buildMap(){
     { id: 'B', x0: 34, x1: 60, dug: [40, 43], comm: 46 },
     { id: 'C', x0: 62, x1: 86, dug: [68, 71], comm: 74 } ];
   const queueTiles = [];
-  for (let gx = 41; gx <= 48; gx++) queueTiles.push([gx, 33]);
-  for (let gx = 41; gx <= 48; gx++) queueTiles.push([gx, 32]);
+  for (const gx of [44, 43, 45, 42, 46, 41, 47, 40, 48, 39, 49, 38]) queueTiles.push([gx, supportY(gx)]);
   return { grid, wire, ladders, sectors, queueTiles,
     hatchTiles: [[12, 27], [43, 27], [68, 27], [30, 36], [55, 44]],
     sentryTiles, bunkTiles, graveTiles,
@@ -276,25 +275,88 @@ function findPath(sx, sy, tx, ty, opts){
   return p || bfsPath(sx, sy, tx, ty, opts, null);
 }
 function exposedTile(t){ return !!t && (t.type === 'ground' || t.type === 'crater') && t.gy > enemyY(t.gx) + 1 && t.gy < trenchY(t.gx) - 1; }
+function tileCost(t, trenchRoad){
+  let c;
+  switch (t.type){
+    case 'road': c = 90; break;
+    case 'trench': case 'dug': case 'etrench': case 'floor': c = 100; break;
+    case 'path': c = 110; break;
+    case 'crater': c = 200 + ((sim && sim.water > 4) ? 160 : 0); break;
+    case 'ground': c = 260; break;
+    default: c = 300; }
+  if (t.rubble > 0.3) c += 140;
+  if (sim && sim.wireSet && sim.wireSet.has(t.gx + ',' + t.gy)) c += 700;
+  for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+    const n = tileAt(t.gx + dx, t.gy + dy);
+    if (n && !walkable(n, false) && n.type !== 'etrench'){ c += 50; break; } }
+  if (trenchRoad && exposedTile(t)) c *= 40;
+  return c;
+}
 function bfsPath(sx, sy, tx, ty, opts, blocked){
   const key = (x, y) => x + ',' + y;
-  const q = [[sx, sy]], prev = new Map([[key(sx, sy), null]]); let qh = 0;
-  while (qh < q.length){ const [cx, cy] = q[qh++];
+  const gScore = new Map([[key(sx, sy), 0]]), prev = new Map([[key(sx, sy), null]]);
+  const heap = []; let ins = 0;
+  const hpush = (f, h, x, y) => { heap.push([f, h, ins++, x, y]);
+    let i = heap.length - 1;
+    while (i > 0){ const p = (i - 1) >> 1;
+      if (heap[p][0] < heap[i][0] || (heap[p][0] === heap[i][0] && (heap[p][1] < heap[i][1] || (heap[p][1] === heap[i][1] && heap[p][2] < heap[i][2])))) break;
+      [heap[p], heap[i]] = [heap[i], heap[p]]; i = p; } };
+  const hpop = () => { const top = heap[0], last = heap.pop();
+    if (heap.length){ heap[0] = last; let i = 0;
+      for (;;){ const l = i * 2 + 1, r = l + 1; let m = i;
+        for (const j of [l, r]) if (j < heap.length && (heap[j][0] < heap[m][0] || (heap[j][0] === heap[m][0] && (heap[j][1] < heap[m][1] || (heap[j][1] === heap[m][1] && heap[j][2] < heap[m][2]))))) m = j;
+        if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m; } }
+    return top; };
+  const heur = (x, y) => (Math.abs(x - tx) + Math.abs(y - ty)) * 90;
+  hpush(heur(sx, sy), heur(sx, sy), sx, sy);
+  const closed = new Set();
+  while (heap.length){ const [, , , cx, cy] = hpop();
+    const ck = key(cx, cy);
+    if (closed.has(ck)) continue; closed.add(ck);
     if (cx === tx && cy === ty) break;
-    const ct = tileAt(cx, cy);
+    const ct = tileAt(cx, cy), cg = gScore.get(ck);
     for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
-      const nx = cx + dx, ny = cy + dy, nt = tileAt(nx, ny);
-      if (!nt || prev.has(key(nx, ny)) || !walkable(nt, opts.enemy)) continue;
-      if (opts.trenchRoad && !(nx === tx && ny === ty) && exposedTile(nt)) continue;
-      if (blocked && blocked.has(key(nx, ny)) && !(nx === tx && ny === ty)) continue;
+      const nx = cx + dx, ny = cy + dy, nt = tileAt(nx, ny), nk = key(nx, ny);
+      if (!nt || closed.has(nk) || !walkable(nt, opts.enemy)) continue;
+      if (blocked && blocked.has(nk) && !(nx === tx && ny === ty)) continue;
       const dz = Math.abs(nt.z - ct.z);
-      const ladderEdge = sim.map.ladders.has(key(cx, cy) + '>' + key(nx, ny));
+      const ladderEdge = sim.map.ladders.has(ck + '>' + nk);
       if (dz > 0.6 && !ladderEdge && !opts.scramble) continue;
-      prev.set(key(nx, ny), [cx, cy]); q.push([nx, ny]); } }
+      const ng = cg + tileCost(nt, opts.trenchRoad);
+      if (ng < (gScore.get(nk) ?? Infinity)){ gScore.set(nk, ng); prev.set(nk, [cx, cy]);
+        const hh = heur(nx, ny); hpush(ng + hh, hh, nx, ny); } } }
   if (!prev.has(key(tx, ty))) return null;
   const path = []; let cur = [tx, ty];
   while (cur){ path.unshift(cur); cur = prev.get(key(cur[0], cur[1])); }
   return path;
+}
+function supercoverClear(x0, y0, x1, y1, enemy){
+  // strict supercover: every tile the centre-to-centre segment passes through must be
+  // walkable and same-layer as its predecessor on the line; a crossing exactly at a
+  // grid corner requires both flank tiles clear as well. Iso-space is tile space here.
+  const ax = x0 + 0.5, ay = y0 + 0.5, bx = x1 + 0.5, by = y1 + 0.5;
+  const dx = bx - ax, dy = by - ay;
+  const stepX = dx > 0 ? 1 : -1, stepY = dy > 0 ? 1 : -1;
+  let cx = x0, cy = y0;
+  const tDeltaX = dx !== 0 ? Math.abs(1 / dx) : Infinity, tDeltaY = dy !== 0 ? Math.abs(1 / dy) : Infinity;
+  let tMaxX = dx !== 0 ? ((stepX > 0 ? (cx + 1 - ax) : (ax - cx)) * tDeltaX) : Infinity;
+  let tMaxY = dy !== 0 ? ((stepY > 0 ? (cy + 1 - ay) : (ay - cy)) * tDeltaY) : Infinity;
+  let prevT = tileAt(cx, cy); if (!prevT || !walkable(prevT, enemy)) return false;
+  let guard = 0;
+  while ((cx !== x1 || cy !== y1) && guard++ < 400){
+    let nx = cx, ny = cy, corner = false;
+    if (Math.abs(tMaxX - tMaxY) < 1e-9){ nx = cx + stepX; ny = cy + stepY; corner = true; tMaxX += tDeltaX; tMaxY += tDeltaY; }
+    else if (tMaxX < tMaxY){ nx = cx + stepX; tMaxX += tDeltaX; }
+    else { ny = cy + stepY; tMaxY += tDeltaY; }
+    if (corner){
+      for (const [fx, fy] of [[cx + stepX, cy], [cx, cy + stepY]]){
+        const ft = tileAt(fx, fy);
+        if (!ft || !walkable(ft, enemy) || Math.abs(ft.z - prevT.z) > 0.6) return false; } }
+    const nt = tileAt(nx, ny);
+    if (!nt || !walkable(nt, enemy)) return false;
+    if (Math.abs(nt.z - prevT.z) > 0.6 && !sim.map.ladders.has(cx + ',' + cy + '>' + nx + ',' + ny)) return false;
+    cx = nx; cy = ny; prevT = nt; }
+  return cx === x1 && cy === y1;
 }
 
 /* ================= tile rendering ================= */
@@ -571,13 +633,24 @@ function goTo(s, gx, gy, opts){
   opts = opts || {};
   let path = findPath(Math.floor(s.fx), Math.floor(s.fy), gx, gy, opts);
   if (!path) return false;
-  if (path.length > 2){ // each man walks his own line, not the surveyor's: jitter the waypoints, keep climbs exact
-    const sm = [path[0]];
+  if (path.length > 2){ // string pulling: straighten what the ground allows, pin what it does not.
+    // Climbs, ladder edges and sharp corners stay pinned; between pins, pull to the
+    // farthest tile with strict-supercover clearance. No waypoint jitter: men differ
+    // by their destination offset, not by wobbling through walls.
+    const pinned = new Set([0, path.length - 1]);
     for (let i = 1; i < path.length - 1; i++){ const a = path[i - 1], b = path[i], c = path[i + 1];
       const za = (tileAt(a[0], a[1]) || {}).z, zb = (tileAt(b[0], b[1]) || {}).z, zc = (tileAt(c[0], c[1]) || {}).z;
-      if (za !== zb || zb !== zc) sm.push(b);
-      else sm.push([b[0] + (hash2(b[0] * 3.1 + s.id * 13.7, b[1] * 7.7) - 0.5) * 0.3, b[1] + (hash2(b[1] * 5.3, b[0] * 9.1 + s.id * 7.3) - 0.5) * 0.3]); }
-    sm.push(path[path.length - 1]); path = sm; }
+      if (za !== zb || zb !== zc) pinned.add(i);
+      else if ((b[0] - a[0]) !== (c[0] - b[0]) || (b[1] - a[1]) !== (c[1] - b[1])) pinned.add(i); }
+    const sm = [path[0]]; let anchor = 0;
+    while (anchor < path.length - 1){
+      let limit = path.length - 1;
+      for (let j = anchor + 1; j < path.length; j++) if (pinned.has(j)){ limit = j; break; }
+      let next = anchor + 1;
+      for (let j = limit; j > anchor + 1; j--)
+        if (supercoverClear(path[anchor][0], path[anchor][1], path[j][0], path[j][1], s.enemy)){ next = j; break; }
+      sm.push(path[next]); anchor = next; }
+    path = sm; }
   s.path = path; s.pathI = 1;
   s.moveStartT = perfT;
   s.destFx = (opts.fx !== undefined) ? gx + opts.fx : gx + 0.5 + (hash2(gx * 3.1 + s.id * 13.7, gy * 7.7) - 0.5) * 0.44;
@@ -625,11 +698,11 @@ function soldierMove(s, dt){
   /* the passing drill: trenches are one man wide and both of you know it.
      Someone close ahead means shuffle to your passing side; no room to shuffle
      means the lesser errand waits and eases back; a blocked node still counts. */
-  let aimX = wx, aimY = wy, sq = 1, blockO = null, lastR = 0.05;
+  let aimX = wx, aimY = wy, sq = 1, blockO = null, lastR = 0.05; let headOn = false;
   { const dirx = dx / (dist || 1), diry = dy / (dist || 1); let blockD = 1e9;
     for (const o of sim.soldiers){ if (o === s || o.dead || o.gone || o.climbing || o.state === 'down') continue;
       const rx = o.fx - s.fx, ry = o.fy - s.fy;
-      if (rx > 1.15 || rx < -1.15 || ry > 1.15 || ry < -1.15) continue;
+      if (rx > 1.7 || rx < -1.7 || ry > 1.7 || ry < -1.7) continue;
       if (rx * dirx + ry * diry < 0.1) continue;
       if (Math.abs(rx * -diry + ry * dirx) > 0.45) continue;
       const d2 = rx * rx + ry * ry; if (d2 < blockD){ blockD = d2; blockO = o; } }
@@ -640,10 +713,19 @@ function soldierMove(s, dt){
           lastR = Math.max(lastR, Math.min(1.3, b.r + bodyRadius(s) + 0.08)); } }
     if (blockO){ const px = diry, py = -dirx, ox = s.fx + px * 0.36, oy = s.fy + py * 0.36;
       const anchored = blockO.state === 'watch' || blockO.state === 'sleep';
+      headOn = false;
+      if (blockO.path && blockO.pathI < blockO.path.length){ const bn = blockO.path[blockO.pathI];
+        const bdx = bn[0] + 0.5 - blockO.fx, bdy = bn[1] + 0.5 - blockO.fy, bl = Math.hypot(bdx, bdy) || 1;
+        headOn = (bdx / bl) * dirx + (bdy / bl) * diry < -0.55; }
+      if (headOn && blockD < 2.6) sq = Math.min(sq, Math.max(0.45, Math.sqrt(blockD) / 1.6));
       if (walkable(tileAt(Math.floor(ox), Math.floor(oy)), s.enemy) && !layerCross(s, ox, oy)){ aimX = wx + px * 0.36; aimY = wy + py * 0.36; sq = 0.55; }
       else if (!anchored && blockO.path && (bodyPriority(s) < bodyPriority(blockO) || (bodyPriority(s) === bodyPriority(blockO) && s.id > blockO.id))){
-        s.yieldT = rr(0.4, 0.7); }
-      else sq = 0.4; } }
+        s.yieldT = headOn ? rr(0.8, 1.3) : rr(0.4, 0.7);
+        if (headOn){ s.pressT = s.yieldT; slidePush(s, px * 0.22, py * 0.22);
+          if (blockD < 0.3) slidePush(s, -dirx * 0.12, -diry * 0.12); } }
+      else sq = headOn && blockO.path ? 1 : 0.4; }
+    if (blockO && headOn && (blockO.pressT || 0) > 0 && (s.yieldT || 0) <= 0){
+      s.strafeT = 0.35; s.drawFaceA = Math.atan2(blockO.fy - s.fy, blockO.fx - s.fx); } }
   if (isLast && dist < 0.7){ s.lastT = (s.lastT || 0) + dt; if (s.lastT > 2.5) lastR = Math.max(lastR, 0.7); } else s.lastT = 0;
   if (dist < (isLast ? lastR : 0.24) || (!isLast && blockO && dist < 0.5)){ // flowing advance: corners round off, only the last node is exact
     const cur = tileAt(Math.floor(s.fx), Math.floor(s.fy)), nxt = tileAt(node[0], node[1]);
@@ -691,6 +773,7 @@ function arrive(s){
       s.bond[f.id] = Math.min(1, (s.bond[f.id] || 0) + 0.1); f.bond[s.id] = Math.min(1, (f.bond[s.id] || 0) + 0.1); }
     else s.vig = { pose: 'cards', t: rr(5, 8) };
     setState(s, 'idle', 1); }
+  else if (act === 'doorwait'){ setState(s, 'idle', Math.max(1.2, (s.doorWait ? s.doorWait.until - sim.t : 3))); }
   else if (act === 'post'){ setState(s, 'watch', rr(4, 8)); }
   else if (act === 'despawn'){ s.gone = true; }
   else if (act === 'bunk'){ setState(s, 'sleep', rr(20, 40)); }
@@ -1428,6 +1511,7 @@ function pawnPoseOf(s){
   if (s.climbing) return 'walkB';
   if (s.stance === 'prone' && !s.path && s.state !== 'down' && s.state !== 'sleep') return 'prone';
   if (s.weaponT > 0 && s.state !== 'down' && s.state !== 'sleep') return s.weaponTo === 'hand' ? 'draw' : 'sling';
+  if ((s.pressT || 0) > 0) return 'press';
   const pose = s.vig ? s.vig.pose : s.state;
   s.vigPose = s.vig ? s.vig.pose : null;
   if (pose === 'watch' || pose === 'shoot') return 'aim';
@@ -1469,7 +1553,8 @@ function drawMan(s){
     ctx.moveTo(px + 3, py - 13); ctx.lineTo(sx + 3, sy - 13); ctx.stroke();
     ctx.fillStyle = PAL.cloth; ctx.beginPath();
     ctx.moveTo(px - 4, py - 13); ctx.lineTo(px + 4, py - 13); ctx.lineTo(sx + 4, sy - 12); ctx.lineTo(sx - 4, sy - 12); ctx.closePath(); ctx.fill(); }
-  let F = facingOf(s); const flip = F === 'W'; if (flip) F = 'E';
+  let F; if ((s.strafeT || 0) > 0 && s.drawFaceA !== undefined){ const fa = s.faceA; s.faceA = s.drawFaceA; F = facingOf(s); s.faceA = fa; } else F = facingOf(s);
+  const flip = F === 'W'; if (flip) F = 'E';
   const spr = pawnSprite(s, pose, F);
   /* his own silhouette on the ground, leaning with the hour: this is what grounds him */
   if (simLight > 0.14){ const sh = pawnShadow(spr), leanS = clamp((sim.hour - 12) / 5.5, -1, 1);
@@ -1491,7 +1576,7 @@ function drawMan(s){
   const flinch = (s.flinchT || 0) * 0.8;
   const kx = -Math.cos(s.faceA) * (kick * 3.6 + flinch * 1.6), ky = -Math.sin(s.faceA) * (kick * 1.5 + flinch * 0.7) - kick * 1.2;
   ctx.save(); ctx.translate(sx + kx + Math.cos(s.faceA) * lg * 3.4, sy + 2 + bobY + ky + Math.sin(s.faceA) * lg * 1.7);
-  ctx.rotate(lean * (flip ? -1 : 1) - kick * 0.055 * (flip ? -1 : 1) + lg * 0.05 + (1 - (s.stanceK === undefined ? 1 : s.stanceK)) * (s.stance === 'crouch' || s.stance === 'kneel' ? 0.1 : 0) + (pose === 'aim' ? Math.sin(perfT * 1.4 + s.id * 2.7) * 0.01 : 0) + (pose === 'stand' && !s.path ? Math.sin(perfT * 0.9 + s.id * 1.3) * 0.006 : 0));
+  ctx.rotate(lean * (flip ? -1 : 1) - kick * 0.055 * (flip ? -1 : 1) + lg * 0.05 + (1 - (s.stanceK === undefined ? 1 : s.stanceK)) * (s.stance === 'crouch' || s.stance === 'kneel' ? 0.1 : 0) + (pose === 'aim' ? Math.sin(perfT * 1.4 + s.id * 2.7) * 0.01 : 0) + (pose === 'stand' && !s.path ? Math.sin(perfT * 0.9 + s.id * 1.3) * 0.006 : 0) + (pose === 'press' ? Math.sin(perfT * 9 + s.id * 3.1) * 0.028 : 0));
   if (flip) ctx.scale(-1, 1);
   ctx.scale(h * (1 + (1 - squash) * 0.6), h * squash * (s.stanceK === undefined ? 1 : s.stanceK));
   ctx.imageSmoothingEnabled = false;
@@ -2075,6 +2160,9 @@ function think(s){
   const idle = (min, max) => setState(s, 'idle', rr(min || 0.6, max || 1.6));
   const go = (gx, gy, opts) => { if (!goTo(s, gx, gy, opts || {})) idle(); };
   if (s.enemy) return;
+  if (s.doorWait){ if (sim.t >= s.doorWait.until){ const dw = s.doorWait; s.doorWait = null; go(dw.x, dw.y, { act: dw.act }); }
+    else if (!s.path) idle(0.6, 1.1);
+    return; }
   if (s.broke || (s.supp > 0.65 && !s.foe)){ if (!s.path) s.vig = { pose: 'sit', t: rr(1.5, 3) }; return; }   // pinned or broken: no new errands until it lifts
   if (!s.enemy && (s.morale ?? 0.7) < 0.3 && (s.supp || 0) < 0.1 && !s.path && !s.job && !s.supplyJob && !s.gatherId && rng() < 0.22){ s.vig = { pose: 'sit', t: rr(6, 12) }; return; }   // the quiet sit: drained, and the hour is quiet
   if (s.supplyJob || s.bearerJob){ idle(0.4, 0.8); return; }            // the machines in updateSoldier drive these
@@ -2781,7 +2869,7 @@ function updateSoldier(s, dt){
       if (done.pose === 'clean' && s.rifle) s.rifle.foul = done.full ? 0.02 : Math.max(0, s.rifle.foul - 0.25); } }
   s.duck = Math.max(0, s.duck - dt); s.clean = Math.max(0, (s.clean || 0) - dt);
   s.kickT = Math.max(0, (s.kickT || 0) - dt * 5.2); s.flinchT = Math.max(0, (s.flinchT || 0) - dt * 2.4); s.lungeT = Math.max(0, (s.lungeT || 0) - dt * 4.2);
-  s.trudge = Math.max(0, (s.trudge || 0) - dt);
+  s.trudge = Math.max(0, (s.trudge || 0) - dt); s.pressT = Math.max(0, (s.pressT || 0) - dt); s.strafeT = Math.max(0, (s.strafeT || 0) - dt);
   s.bumpT = Math.max(0, (s.bumpT || 0) - dt * 3);
   /* stance: how the body rides. Flags, fire and posts drive it; the body eases between. */
   s.proneT = Math.max(0, (s.proneT || 0) - dt);
@@ -2902,6 +2990,28 @@ function updateSoldier(s, dt){
   /* stall recovery: a man with a path who has not moved in three seconds is wedged
      (a corner, a jam, a blocked node). Drop the path; his job or his thoughts will re-route him. */
   s.stallT = (s.stallT || 0) + dt;
+  if (!s.enemy && s.path && !s.climbing && !s.carryCas && !s.bearerJob && !s.supplyJob && s.destFx !== undefined){
+    const dDest = Math.hypot(s.destFx - s.fx, s.destFy - s.fy);
+    let crowd = 0;
+    if (dDest < 2.4) for (const o of sim.soldiers){ if (o !== s && !o.dead && !o.gone && Math.abs(o.fx - s.fx) < 1.15 && Math.abs(o.fy - s.fy) < 1.15) crowd++; }
+    if (dDest < 2.4 && crowd >= 3) s.doorT = (s.doorT || 0) + dt; else s.doorT = 0;
+    if ((s.doorT || 0) > 1.6){
+      s.doorT = 0;
+      const dKey = Math.floor(s.destFx) + ',' + Math.floor(s.destFy);
+      if (s.doorKey !== dKey){ s.doorKey = dKey;
+        const myT = tileAt(Math.floor(s.fx), Math.floor(s.fy));
+        outer: for (let r = 1; r <= 2; r++)
+          for (let ox = -r; ox <= r; ox++) for (let oy = -r; oy <= r; oy++){
+            if (Math.max(Math.abs(ox), Math.abs(oy)) !== r) continue;
+            const wx = Math.floor(s.fx) + ox, wy = Math.floor(s.fy) + oy, wt = tileAt(wx, wy);
+            if (!wt || !walkable(wt, false) || (myT && wt.z !== myT.z)) continue;
+            if (wx === Math.floor(s.destFx) && wy === Math.floor(s.destFy)) continue;
+            let clear = true;
+            for (const o of sim.soldiers){ if (o !== s && !o.dead && !o.gone && Math.hypot(o.fx - (wx + 0.5), o.fy - (wy + 0.5)) < 1.0){ clear = false; break; } }
+            if (!clear) continue;
+            s.doorWait = { x: Math.floor(s.destFx), y: Math.floor(s.destFy), act: s.arriveAct, until: sim.t + rr(6, 10) };
+            if (goTo(s, wx, wy, { act: 'doorwait' })) break outer;
+            s.doorWait = null; } } } }
   if (s.stallT > 3){ s.stallT = 0;
     if (s.path && !s.climbing && s._lx !== undefined && Math.hypot(s.fx - s._lx, s.fy - s._ly) < 0.3){
       /* wedged on a man, a prop, a corner: first step out of the wedge, only then give the path up */
@@ -3456,6 +3566,22 @@ function physicsStep(dt){
   bodies.forEach(s => { const k = Math.floor(s.fx) + ',' + Math.floor(s.fy);
     if (!grid.has(k)) grid.set(k, []); grid.get(k).push(s); });
   const statics = sim.staticBodies || (sim.staticBodies = buildStaticBodies());
+  const wallResolve = (s) => {
+    const r = bodyRadius(s), cx = Math.floor(s.fx), cy = Math.floor(s.fy);
+    for (let gx = cx - 1; gx <= cx + 1; gx++) for (let gy = cy - 1; gy <= cy + 1; gy++){
+      const t = tileAt(gx, gy);
+      const isWall = !t || !walkable(t, s.enemy) || Math.abs(t.z - s.z) > 0.6;
+      if (!isWall) continue;
+      const qx = clamp(s.fx, gx, gx + 1), qy = clamp(s.fy, gy, gy + 1);
+      let dx = s.fx - qx, dy = s.fy - qy; const d2 = dx * dx + dy * dy;
+      if (d2 > r * r) continue;
+      if (d2 > 1e-9){ const d = Math.sqrt(d2), push = Math.min(0.09, r - d);
+        slidePush(s, dx / d * push, dy / d * push); }
+      else { // centre inside the wall box: leave along the shallowest face
+        const pens = [[s.fx - gx, -1, 0], [gx + 1 - s.fx, 1, 0], [s.fy - gy, 0, -1], [gy + 1 - s.fy, 0, 1]];
+        pens.sort((a, b) => a[0] - b[0]);
+        slidePush(s, pens[0][1] * Math.min(0.09, pens[0][0] + r), pens[0][2] * Math.min(0.09, pens[0][0] + r)); } } };
+  for (let it = 0; it < 2; it++) for (const s of bodies){ if (s.rag && s.rag.t > 0) continue; wallResolve(s); }
   for (const s of bodies){
     if (s.rag && s.rag.t > 0) continue;
     for (const b of statics){ if (b.idx !== undefined && s.enemy === b.side && s.gun === b.idx) continue;
@@ -3471,7 +3597,9 @@ function physicsStep(dt){
         const sDown = s.state === 'down' || s.dead, oDown = o.state === 'down' || o.dead;
         if (sDown && oDown) continue;
         if ((s.rag && s.rag.t > 0) || (o.rag && o.rag.t > 0)) continue;
-        let dx = o.fx - s.fx, dy = o.fy - s.fy; const d = Math.hypot(dx, dy), minD = bodyRadius(s) + bodyRadius(o);
+        let dx = o.fx - s.fx, dy = o.fy - s.fy; const d = Math.hypot(dx, dy);
+        let minD = bodyRadius(s) + bodyRadius(o);
+        if (((s.pressT || 0) > 0 || (o.pressT || 0) > 0) && trenchLike(tileAt(Math.floor(s.fx), Math.floor(s.fy))) && trenchLike(tileAt(Math.floor(o.fx), Math.floor(o.fy)))) minD = 0.44;
         if (d >= minD || d < 1e-4) continue;
         const overlap = minD - d; dx /= d; dy /= d;
         const ms = bodyMass(s), mo = bodyMass(o);
@@ -3483,6 +3611,7 @@ function physicsStep(dt){
         const cs = Math.min(0.085, overlap * ws), co = Math.min(0.085, overlap * wo);
         slidePush(s, -dx * cs, -dy * cs); slidePush(o, dx * co, dy * co);
         if (overlap > 0.09){ s.bumpT = 1; o.bumpT = 1; } } } }
+  for (const s of bodies){ if (s.rag && s.rag.t > 0) continue; wallResolve(s); }   // walls get the last word, after separation
   for (const s of bodies){
     const [ox, oy] = startPos.get(s.id);
     const t0 = tileAt(Math.floor(ox), Math.floor(oy));
