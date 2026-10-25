@@ -677,7 +677,7 @@ function arrive(s){
   s.stallN = 0;
   const act = s.arriveAct; s.arriveAct = null;
   if (s.role === 'carrier' && s.leg){ arriveCarrier(s); return; }
-  if (act === 'bow'){ s.vig = { pose: 'bow', t: rr(5, 8) }; setState(s, 'idle', 1); }
+  if (act === 'bow'){ s.vig = { pose: 'bow', t: rr(5, 8) * ((s.grief || 0) > 0.8 ? 2.2 : 1) }; setState(s, 'idle', 1); }
   else if (act === 'visit'){ const f = sim.soldiers.find(x => x.id === s.visitId); s.visitId = undefined;
     if (f && !f.dead && !f.path && !f.talk && !f.gatherId && f.state !== 'down' && f.state !== 'sleep'){ const dur = rr(14, 28);
       s.talk = { with: f.id, t: dur }; f.talk = { with: s.id, t: dur }; f.vig = null;
@@ -1174,10 +1174,13 @@ function kgSprite(s, pose, F){
 }
 
 function pawnSprite(s, pose, F){
-  const key = ['KG', s.enemy ? 'E' : 'F', s.id, pose, F, s.squadMark || 0, s.bayonet ? 'B' : '',
+  const key = ['KG', s.enemy ? 'E' : 'F', s.id, (s.record && s.record.wounds ? 'W' + Math.min(2, s.record.wounds) : ''), pose, F, s.squadMark || 0, s.bayonet ? 'B' : '',
     (pose === 'stand' || pose.indexOf('walk') === 0) ? (s.weapon || 'back') : '', s.vigPose || ''].join('|');
   if (pawnCache.has(key)) return pawnCache.get(key);
   const spr = kgSprite(s, pose, F);
+  if (spr.width === 76 && s.record && s.record.wounds > 0){ const g2 = spr.getContext('2d'); const R3 = mulberry32(5000 + s.id * 13);
+    g2.strokeStyle = 'rgba(90, 46, 28, 0.9)'; g2.lineWidth = 1.8; g2.beginPath();
+    const sx = 31 + R3() * 10, sy = 17 + R3() * 7; g2.moveTo(sx, sy); g2.lineTo(sx + 5 + R3() * 3, sy + 3); g2.stroke(); }
   if (pawnCache.size > 2600) pawnCache.clear();
   pawnCache.set(key, spr); return spr;
 }
@@ -1976,6 +1979,7 @@ function think(s){
   const go = (gx, gy, opts) => { if (!goTo(s, gx, gy, opts || {})) idle(); };
   if (s.enemy) return;
   if (s.broke || (s.supp > 0.65 && !s.foe)){ if (!s.path) s.vig = { pose: 'sit', t: rr(1.5, 3) }; return; }   // pinned or broken: no new errands until it lifts
+  if (!s.enemy && (s.morale ?? 0.7) < 0.3 && (s.supp || 0) < 0.1 && !s.path && !s.job && !s.supplyJob && !s.gatherId && rng() < 0.22){ s.vig = { pose: 'sit', t: rr(6, 12) }; return; }   // the quiet sit: drained, and the hour is quiet
   if (s.supplyJob || s.bearerJob){ idle(0.4, 0.8); return; }            // the machines in updateSoldier drive these
   /* ---- needs before duties ---- */
   if (s.rest < 0.22 && !standTo && !sim.raid.active){
@@ -2224,7 +2228,9 @@ function burst(bx, by){
     else if (d < 3.4 && s.state !== 'down'){ const tt = tileAt(Math.floor(s.fx), Math.floor(s.fy));
       if (tt && tt.z >= 0 && !s.path) s.proneT = Math.max(s.proneT || 0, rr(2.5, 4.5));
       else s.duck = Math.max(s.duck, rr(0.7, 1.4)); }
-    if (d < 4.5 && s.state !== 'down') s.nerves = Math.max(0, (s.nerves ?? 0.8) - (4.5 - d) * 0.006); });
+    if (d < 4.5 && s.state !== 'down') s.nerves = Math.max(0, (s.nerves ?? 0.8) - (4.5 - d) * 0.006);
+    if (d < 5.2 && s.state !== 'down' && (s.jumpy || 0) > 0){ s.duck = Math.max(s.duck || 0, rr(1.0, 1.6)); s.flinchT = 1;
+      if (!s.path){ const a2 = Math.atan2(s.fy - by, s.fx - bx); slidePush(s, Math.cos(a2) * 0.18, Math.sin(a2) * 0.18); } } });
   suppAll(bx, by, 0.5, 3.6);
 }
 function dropJob(s){ if (s.job){ s.job = null; } }
@@ -2337,7 +2343,7 @@ function killSoldier(s, cause){
     r0.squad = s.squad; (sim.fallen = sim.fallen || []).push(r0); }
 }
 function fireTracer(a, b){
-  sim.parts.push({ kind:'tracer', fx0: a.fx, fy0: a.fy, z0: a.z + 1.3, fx1: b.fx ?? b[0], fy1: b.fy ?? b[1], z1: (b.z ?? 0) + 1, t: 0, life: 0.09 });
+  sim.parts.push({ kind:'tracer', side: a.enemy ? 1 : 0, fx0: a.fx, fy0: a.fy, z0: a.z + 1.3, fx1: b.fx ?? b[0], fy1: b.fy ?? b[1], z1: (b.z ?? 0) + 1, t: 0, life: 0.09 });
   puff(a.fx, a.fy, a.z + 1.2, 26, { tint:'smoke', vh: 2.2, life: rr(1, 1.7), r: rr(5, 7.5), a: 0.55 });
   for (let i = 0; i < 3; i++){ const d = 0.35 + i * 0.3;
     sim.parts.push({ kind: 'puff', fx: a.fx + Math.cos(a.faceA) * d, fy: a.fy + Math.sin(a.faceA) * d, z: a.z + 1.1,
@@ -2571,7 +2577,7 @@ function updateClimate(dt){
 }
 
 function sectorOfX(x){ return x < 33 ? 0 : x < 61 ? 1 : 2; }
-function suppCover(tt){ return tt ? (trenchLike(tt.t) ? 0.65 : tt.t === 'crater' ? 0.8 : (tt.t === 'dug' || tt.t === 'floor') ? 0.6 : 1) : 1; }
+function suppCover(tt){ return tt ? (tt.type === 'crater' ? 0.8 : trenchLike(tt) ? 0.65 : tt.type === 'floor' ? 0.6 : 1) : 1; }
 function suppNear(x, y, targetEnemy, amt){   /* near misses: only the side being shot at feels them */
   sim.soldiers.forEach(m => { if (m.dead || m.state === 'down' || m.gone) return;
     if (targetEnemy && !m.enemy) return; if (!targetEnemy && m.enemy) return;
@@ -2590,7 +2596,7 @@ function enemyShotAt(tgt, hitP){
   fireTracer(ghost, land); WarAudio.rifle(gx, gy);
   suppNear(land.fx, land.fy, false, 0.22);
   const tt = tileAt(Math.floor(tgt.fx), Math.floor(tgt.fy));
-  const exposed = !(tt && (trenchLike(tt.t) || tt.t === 'dug' || tt.t === 'floor'));
+  const exposed = !(tt && (trenchLike(tt) || tt.type === 'floor'));
   if (rng() < hitP * (exposed ? 2.2 : 1)) wound(tgt, 'rifle fire'); }
 function flareTick(dt){
   for (let i = 0; i < 3; i++){ const F = sim.flare[i], sec = sim.map.sectors[i];
@@ -2633,11 +2639,15 @@ function leaderTick(dt){
 function feelTick(s, dt){
   if (s.dead || s.gone) return;
   const tt = tileAt(Math.floor(s.fx), Math.floor(s.fy));
-  const inCover = tt && (trenchLike(tt.t) || tt.t === 'crater');
+  const inCover = tt && (trenchLike(tt) || tt.type === 'crater');
   if ((s.supp || 0) > 0 && sim.t - (s.suppAt || -9) > 1) s.supp = Math.max(0, s.supp - 0.045 * dt * (inCover ? 1.5 : 1));
   if (s.state !== 'down'){
-    if (s.supp > 0.65 && tt && tt.z >= 0 && !trenchLike(tt.t) && !s.path) s.proneT = Math.max(s.proneT || 0, 0.5);
+    if (s.supp > 0.65 && tt && tt.z >= 0 && !trenchLike(tt) && !s.path) s.proneT = Math.max(s.proneT || 0, 0.5);
+    else if (s.supp > 0.65 && inCover) s.duck = Math.max(s.duck || 0, 1);
     else if (s.supp > 0.35) s.duck = Math.max(s.duck || 0, 0.55);
+    if (s.supp > 0.65) s.wasPinned = true;
+    else if (s.wasPinned && s.supp < 0.35){ s.wasPinned = false;
+      if (!s.enemy && !s.path && !s.job && !s.supplyJob && !s.vig) s.vig = { pose: 'clean', t: rr(2, 3.5) }; }
     const moving = !!s.path;
     if (s.state === 'run' || (s.enemy && s.raid && s.rushPh === 0 && moving)) s.fat = Math.min(1, (s.fat || 0) + 0.03 * dt);
     else if (s.state === 'carry' || s.state === 'drag') s.fat = Math.min(1, (s.fat || 0) + 0.012 * dt);
@@ -2660,7 +2670,7 @@ function feelTick(s, dt){
         else if (!s.path && !s.vig && s.state !== 'down') s.vig = { pose: 'sit', t: rr(1.5, 3) }; } } }
   if (s.enemy && s.raid && s.state !== 'down'){
     const tt2 = tileAt(Math.floor(s.fx), Math.floor(s.fy));
-    const open = tt2 && tt2.z >= 0 && !trenchLike(tt2.t) && s.fy < 18.5;
+    const open = tt2 && tt2.z >= 0 && !trenchLike(tt2) && s.fy < 18.5;
     if (open && s.path && (s.fat || 0) < 0.85){
       if (s.rushPh === 0){ s.rushT = (s.rushT ?? rr(2, 4)) - dt;
         if (s.rushT <= 0){ s.holdT = s.supp > 0.65 ? rr(2.5, 4) : rr(1.3, 2.3); s.rushPh = 1; s.proneT = Math.max(s.proneT || 0, s.holdT); } } }
@@ -3092,6 +3102,10 @@ function portraitURL(r){ try { const stub = { id: r.id, enemy: !!r.enemy, trade:
     const c = document.createElement('canvas'); c.width = 48; c.height = 48; const g = c.getContext('2d');
     g.fillStyle = '#d9cfb0'; g.fillRect(0, 0, 48, 48);
     g.drawImage(spr, 14, 0, 48, 50, 0, 0, 48, 48);
+    if (r.wounds > 0){ const R2 = mulberry32(9000 + r.id * 7);   /* the scar stays on his face in the record */
+      g.strokeStyle = 'rgba(90, 46, 28, 0.92)'; g.lineWidth = 2; g.beginPath();
+      const sx = 16 + R2() * 12, sy = 19 + R2() * 7; g.moveTo(sx, sy); g.lineTo(sx + 5 + R2() * 3, sy + 3 + R2() * 2); g.stroke();
+      if (r.wounds > 1){ g.beginPath(); const sx2 = 15 + R2() * 16, sy2 = 12 + R2() * 4; g.moveTo(sx2, sy2); g.lineTo(sx2 + 6, sy2 + 2); g.stroke(); } }
     return c.toDataURL('image/png'); } catch (e) { return ''; } }
 function obitText(r){ let t = '<b>' + cap1(r.desc) + '.</b> Came on day ' + r.cameDay + '. Fell on day ' + r.diedDay + ' (' + r.cause + ').';
   if (r.wounds) t += ' Carried in ' + (r.wounds === 1 ? 'once' : r.wounds + ' times') + ' before the end.';
@@ -3899,7 +3913,7 @@ function drawPart(p){
   else if (p.kind === 'steam'){ ctx.fillStyle = 'rgba(200,200,196,.13)';
     const sx = isoX(p.fx, p.fy) + (p.ox || 0), sy = isoY(p.fx, p.fy, p.z) - (p.h || 8);
     ctx.beginPath(); ctx.arc(sx, sy, p.r * (1 + p.t), 0, 6.29); ctx.fill(); }
-  else if (p.kind === 'tracer'){ ctx.strokeStyle = `rgba(255,214,140,${0.85 * (1 - p.t / p.life)})`; ctx.lineWidth = 1.6;
+  else if (p.kind === 'tracer'){ ctx.strokeStyle = p.side ? `rgba(178,226,150,${0.85 * (1 - p.t / p.life)})` : `rgba(255,205,120,${0.85 * (1 - p.t / p.life)})`; ctx.lineWidth = 1.6;
     ctx.beginPath(); ctx.moveTo(isoX(p.fx0, p.fy0), isoY(p.fx0, p.fy0, p.z0));
     ctx.lineTo(isoX(p.fx1, p.fy1), isoY(p.fx1, p.fy1, p.z1)); ctx.stroke(); }
   else if (p.kind === 'shell'){ const px = lerp(p.fx, p.tx, p.p), py = lerp(p.fy, p.ty, p.p), h = 250 * (1 - p.p) * (1 - p.p) + 4;
