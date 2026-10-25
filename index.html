@@ -622,12 +622,464 @@ function pawnShadow(spr){ if (shadowCache.has(spr)) return shadowCache.get(spr);
   g.fillStyle = 'rgba(22,17,10,1)'; g.fillRect(0, 0, c.width, c.height);
   if (shadowCache.size > 500) shadowCache.clear();
   shadowCache.set(spr, c); return c; }
+const KGT = Math.PI * 2;
+/* ================= KINDRED GENERATOR (5.0): every soldier grown from his seed =================
+   One algorithm, no two men alike. A man's look seed is the war seed + his id, so he is the
+   same man every frame of the war. The enemy are grown from the same factory with their own
+   culture axes: ash coats, pale beards, no lamps. They come in the dark. */
+const KG_COATS = [
+  ['#46635a', '#638376', '#2e423a'], ['#575c42', '#747856', '#383b2a'], ['#61523f', '#82735c', '#423829'],
+  ['#47596a', '#62788c', '#303e49'], ['#5f4a47', '#7d6663', '#403231'], ['#53634c', '#728465', '#39452f'],
+  ['#66582f', '#877448', '#473b1f'], ['#4d4d4d', '#6b6b6b', '#333333'] ];
+const KG_ECOATS = [
+  ['#5c5a52', '#76736a', '#3e3c36'], ['#6b6258', '#867a6c', '#4a423a'], ['#565049', '#6f6459', '#3a332c'],
+  ['#62605c', '#7d7b76', '#43423f'], ['#5e5648', '#766c58', '#403a30'] ];
+const KG_BEARDS = [
+  ['#b06a35', '#8f5226', '#cc8447'], ['#989a9c', '#7a7c7e', '#b8babd'], ['#59493d', '#443830', '#726052'],
+  ['#d3ccbe', '#ada595', '#eae4d4'], ['#8a5530', '#6e421f', '#a46c42'], ['#38332e', '#28241f', '#504943'],
+  ['#bf985c', '#a07744', '#d4ae72'], ['#a35f45', '#834a32', '#bc7c5c'], ['#7d6f62', '#63564b', '#998a7b'],
+  ['#e2ded4', '#c2bcb0', '#f4f0e6'] ];
+const KG_EBEARDS = [
+  ['#c9c4b8', '#a49e90', '#ded8cc'], ['#8f8c85', '#6f6c66', '#aaa79f'], ['#4c463f', '#38332c', '#615a50'],
+  ['#dcd6c9', '#bab3a3', '#efe9dc'], ['#7c766c', '#5e594f', '#99938a'] ];
+const KG_SKINS = ['#d69e72', '#c48d5f', '#e0aa7d', '#b57a4e'];
+const KG_ESKINS = ['#cdb49b', '#bfa78c', '#dbc0a2', '#c2ab90'];
+const KG_SCARVES = ['#9c4433', '#cfa146', '#638376', '#7d7199', '#b06a35', '#47647d', null, null];
+const KG_STYLES = ['full', 'fork', 'braid', 'wild', 'short'];
+function kgHash(str){ let h = 2166136261; for (let i = 0; i < str.length; i++){ h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+function kgLook(s){
+  const warSeed = (typeof sim !== 'undefined' && sim && sim.seedStr) ? sim.seedStr : 'war';
+  const rnd = mulberry32(kgHash(warSeed + '|kg|' + (s.enemy ? 'E' : 'F') + '|' + s.id));
+  const coats = s.enemy ? KG_ECOATS : KG_COATS, beards = s.enemy ? KG_EBEARDS : KG_BEARDS, skins = s.enemy ? KG_ESKINS : KG_SKINS;
+  const coat = coats[(rnd() * coats.length) | 0], beard = beards[(rnd() * beards.length) | 0];
+  const patches = []; const nP = 1 + ((rnd() * 3) | 0);
+  for (let i = 0; i < nP; i++) patches.push({ x: (rnd() - 0.5) * 22, y: -34 + rnd() * 22, w: 4 + rnd() * 4, h: 3.6 + rnd() * 3.4, tone: rnd() });
+  return { enemy: !!s.enemy, coat, beard, patches,
+    beardStyle: KG_STYLES[(rnd() * KG_STYLES.length) | 0],
+    skin: skins[(rnd() * skins.length) | 0],
+    scarf: s.enemy ? null : KG_SCARVES[(rnd() * KG_SCARVES.length) | 0],
+    girth: s.enemy ? 0.84 + rnd() * 0.16 : 0.92 + rnd() * 0.2,
+    height: s.enemy ? 1.0 + rnd() * 0.12 : 0.94 + rnd() * 0.12,
+    lamp: !s.enemy && rnd() < 0.82, lampSide: rnd() < 0.5 ? -1 : 1,
+    ember: !!s.enemy,
+    gloveTone: 0.85 + rnd() * 0.3, drumSide: rnd() < 0.5 ? -3 : 3,
+    trade: s.trade, squadMark: s.squadMark || 0, bayonet: !!s.bayonet,
+    jit: (rnd() * 1e9) | 0, seedKey: s.id * 31 + (s.enemy ? 7 : 0) };
+}
+let KG_P = null, KG_CUR = null;
+function kgPalette(look){
+  return { coat: look.coat[0], coatL: look.coat[1], coatD: look.coat[2], trouser: '#554636', dark: '#241d13',
+    leather: '#7d5c36', leatherL: '#99744a', brass: '#cfa146', drum: '#3b3831', skin: look.skin, skinD: '#96683f',
+    beard: look.beard, rim: 'rgba(255,196,110,.9)', pale: '#ddd6c4', steel: '#5a564e', red: '#b03024' };
+}
+function kgRim(g, pts){ g.strokeStyle = KG_P.rim; g.lineWidth = 1.7; g.lineCap = 'round';
+  for (let i = 0; i + 1 < pts.length; i += 2){ g.beginPath(); g.moveTo(pts[i][0], pts[i][1]); g.lineTo(pts[i + 1][0], pts[i + 1][1]); g.stroke(); } }
+function kgClump(g, cx, cy, w, h, tones, seed, n, ang){
+  const rnd = mulberry32(seed >>> 0 || 1);
+  for (let i = 0; i < n; i++){
+    const px = cx + (rnd() - 0.5) * w, py = cy + (rnd() - 0.5) * h, ln = 2.6 + rnd() * 3.6, a = ang + (rnd() - 0.5) * 0.7;
+    g.strokeStyle = tones[(rnd() * tones.length) | 0]; g.lineWidth = 1.5 + rnd() * 1.3; g.lineCap = 'round';
+    g.beginPath(); g.moveTo(px, py); g.lineTo(px + Math.cos(a) * ln, py + Math.sin(a) * ln); g.stroke(); } }
+function kgDome(g, x, GY, seed){
+  const P = KG_P;
+  if (KG_CUR.enemy){ /* the shellback: a taller dome with a skirt at the rear */
+    g.fillStyle = P.coatD; g.beginPath(); g.ellipse(x + 0.6, GY - 88.6, 10.2, 7.6, 0, Math.PI, 0); g.fill();
+    kgR(g, x - 10.4, GY - 89.2, 23.2, 2.8, P.coatD); kgR(g, x - 10.4, GY - 89.2, 4.2, 6.4, P.coatD);
+    kgClump(g, x - 3, GY - 92, 12, 5, [P.coatL], seed + 53, 5, 0.3);
+    kgRim(g, [[x + 6.2, GY - 95.4], [x + 10.4, GY - 89.4]]); return; }
+  g.fillStyle = P.coatD; g.beginPath(); g.ellipse(x + 0.6, GY - 89.4, 10.6, 6, 0, Math.PI, 0); g.fill();
+  kgR(g, x - 10.8, GY - 89.8, 24, 2.8, P.coatD);
+  if (KG_CUR.lamp) kgE(g, x + 0.6 + KG_CUR.lampSide * 5.4, GY - 92.4, 1.7, '#ffd98a');
+  kgClump(g, x - 3, GY - 91, 13, 4.4, [P.coatL], seed + 53, 5, 0.3);
+  kgRim(g, [[x + 6.4, GY - 94.6], [x + 10.8, GY - 89.8], [x + 11.6, GY - 88.6], [x + 11.6, GY - 87.8]]);
+  if (KG_CUR.squadMark && !KG_CUR.enemy){ g.fillStyle = '#e8e2ce';
+    if (KG_CUR.squadMark === 1) g.fillRect(x + 6.4, GY - 94.4, 3.4, 1.8);
+    else if (KG_CUR.squadMark === 2){ g.fillRect(x + 5.6, GY - 94.6, 1.7, 3); g.fillRect(x + 8.6, GY - 94.6, 1.7, 3); }
+    else { g.fillRect(x + 6.8, GY - 94.8, 2, 3.4); g.fillRect(x + 5.8, GY - 93.8, 4, 1.7); } }
+}
+
+function kgR(g, x, y, w, h, c){ g.fillStyle = c; g.fillRect(x, y, w, h); }
+function kgL(g, x0, y0, x1, y1, w, c){ g.strokeStyle = c; g.lineWidth = w; g.lineCap = 'round'; g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.stroke(); }
+function kgE(g, x, y, rx, ry, c){ g.fillStyle = c; g.beginPath(); g.ellipse(x, y, Math.abs(rx), Math.abs(ry || rx), 0, 0, KGT); g.fill(); }
+const KG_KNEEL = ['lay', 'crank', 'repair', 'cook'];
+function kgS(g, x, GY, pose, ph){
+  const P = KG_P, CU = KG_CUR, B = P.beard, t = 1.3 + CU.seedKey;
+  const walking = pose === 'walk', sw = walking ? Math.sin(ph * KGT) : 0;
+  const bob = walking ? Math.abs(Math.sin(ph * KGT)) * -2.2 : Math.sin(t * 1.7 + x) * 0.5;
+  const bow = (pose === 'bow' || pose === 'reload') ? 2.6 : 0;
+  const kneel = KG_KNEEL.includes(pose);
+  kgE(g, x, GY + 3, 24, 4.2, 'rgba(10,6,2,.4)');
+  g.save(); g.translate(0, bob);
+  if (kneel){ g.beginPath(); g.moveTo(x - 20, GY - 2); g.quadraticCurveTo(x - 18, GY - 26, x - 10, GY - 30);
+    g.lineTo(x + 10, GY - 30); g.quadraticCurveTo(x + 18, GY - 26, x + 20, GY - 2); g.closePath(); g.fillStyle = P.coat; g.fill();
+    kgClump(g, x, GY - 14, 30, 22, [P.coatD, P.coat], x + 19, 12, 1.1);
+    kgR(g, x - 15, GY - 4.6, 12.4, 4.6, P.dark); kgR(g, x + 3, GY - 4.6, 12.4, 4.6, P.dark); }
+  else { const lA = sw * 7, lB = -sw * 7;
+    kgL(g, -7 + x, GY - 26, -7 + lA + x, GY - 5, 8.4, P.trouser); kgL(g, 7 + x, GY - 26, 7 + lB + x, GY - 5, 8.4, P.trouser);
+    for (let i = 0; i < 3; i++){ kgL(g, x - 10 + lA * 0.8, GY - 15 + i * 4.4, x - 4 + lA * 0.8, GY - 15 + i * 4.4, 1.3, P.coatD); kgL(g, x + 4 + lB * 0.8, GY - 15 + i * 4.4, x + 10 + lB * 0.8, GY - 15 + i * 4.4, 1.3, P.coatD); }
+    kgR(g, x - 13.4 + lA, GY - 4.6, 12.4, 4.6, P.dark); kgR(g, x + 1 + lB, GY - 4.6, 12.4, 4.6, P.dark); }
+  kgE(g, x - 19, GY - 70, 6.4, 12, P.leather); kgClump(g, x - 19, GY - 70, 8, 20, [P.leatherL, P.leather], x + 31, 6, 1.2);
+  const topY = GY - 74;
+  g.beginPath(); g.moveTo(x - 17, topY - 4); g.quadraticCurveTo(x, topY - 8, x + 17, topY - 4);
+  g.lineTo(x + 16, GY - 52); g.lineTo(x + 21 + sw * 1.6, GY - 25); g.lineTo(x + 13, GY - 22.6); g.lineTo(x + 5, GY - 25.4);
+  g.lineTo(x - 3, GY - 22.8); g.lineTo(x - 12, GY - 25.2); g.lineTo(x - 20 - sw * 1.6, GY - 24); g.lineTo(x - 16, GY - 52); g.closePath();
+  g.fillStyle = P.coat; g.fill();
+  g.save(); g.clip(); kgClump(g, x - 4, GY - 52, 30, 52, [P.coatD, P.coat], x + 7, 26, 1.35); kgClump(g, x - 8, GY - 66, 16, 26, [P.coatL], x + 13, 9, 1.2);
+  kgR(g, x + 9.6, GY - 80, 9, 58, 'rgba(0,0,0,.28)'); g.restore();
+  kgL(g, x - 8, GY - 74, x + 9, GY - 52, 1.8, P.dark);
+  kgR(g, x - 17.4, GY - 51, 34.8, 3.4, P.dark); kgE(g, x, GY - 49.4, 2, P.brass);
+  kgR(g, x - 21.4, GY - 50, 5.6, 8.6, P.leather); kgR(g, x + 15.8, GY - 50, 5.6, 8.6, P.leather);
+  for (const p of CU.patches){ kgR(g, x + p.x, GY + p.y, p.w, p.h, p.tone < 0.5 ? P.coatL : '#8a6c4a');
+    kgL(g, x + p.x, GY + p.y + 0.8, x + p.x + p.w, GY + p.y + 0.8, 0.7, P.dark); }
+  kgE(g, x + CU.drumSide, GY - 60, 7, 7, P.drum); kgE(g, x + CU.drumSide, GY - 60, 4.4, 4.4, '#5a564e'); kgE(g, x + CU.drumSide, GY - 60, 1.8, P.dark);
+  if (CU.ember) kgE(g, x + CU.drumSide, GY - 60, 1.6, '#c33d21');
+  g.strokeStyle = P.dark; g.lineWidth = 1.6; g.beginPath(); g.moveTo(x + CU.drumSide, GY - 66.4); g.quadraticCurveTo(x + 10, GY - 72, x + 6, GY - 78); g.stroke();
+  kgRim(g, [[x + 16.8, GY - 76], [x + 17.4, GY - 64], [x + 17.2, GY - 58], [x + 19.8, GY - 40], [x + 20.6, GY - 34], [x + 20.2, GY - 27]]);
+  if (CU.trade === 'cook'){ kgR(g, x - 6, GY - 72, 12.4, 24, P.pale); kgR(g, x - 6, GY - 72, 12.4, 2.4, '#b8b09a'); }
+  if (CU.trade === 'medic' || CU.trade === 'bearer'){
+    kgR(g, x - 20.4, GY - 68, 4.6, 6.4, P.pale); kgE(g, x - 18.2, GY - 64.8, 1.5, P.red);
+    kgR(g, x + 15.8, GY - 68, 4.6, 6.4, P.pale); kgE(g, x + 18, GY - 64.8, 1.5, P.red); }
+  /* arms and the work of the pose */
+  const aL = (hx, hy, tone) => { kgL(g, x - 15, GY - 73, hx, hy + 4, 8.6, tone || P.coatD); kgE(g, hx, hy, 4.6, 5.2, P.leather); };
+  const aR = (hx, hy, tone) => { kgL(g, x + 15, GY - 73, hx, hy + 4, 8.6, tone || P.coat); kgE(g, hx, hy, 4.6, 5.2, P.leather); };
+  const rifleFwd = (lean, len) => { kgL(g, x + 2, GY - 60, x + 26, GY - 61 - lean, 4.4, P.leather);
+    kgL(g, x + 20, GY - 60.6 - lean * 0.7, x + (len || 40), GY - 62 - lean, 2.6, P.steel);
+    if (CU.bayonet) kgL(g, x + (len || 40), GY - 62 - lean, x + (len || 40) + 9, GY - 62.6 - lean, 1.4, P.pale); };
+  if (pose === 'aim' || pose === 'fight'){ aL(x + 20, GY - 56); aR(x + 13, GY - 61); rifleFwd(pose === 'fight' ? 0 : 2); }
+  else if (pose === 'thrust'){ aL(x + 22, GY - 57); aR(x + 15, GY - 61); rifleFwd(1, 58); }
+  else if (pose === 'boltA' || pose === 'boltB'){ aL(x + 20, GY - 56); rifleFwd(2);
+    if (pose === 'boltA'){ aR(x + 10.4, GY - 67); kgE(g, x + 8.6, GY - 68.4, 1.6, P.dark); }
+    else { aR(x + 6.4, GY - 65); kgE(g, x + 4.6, GY - 66.6, 1.6, P.dark); } }
+  else if (pose === 'reload'){ aL(x + 12, GY - 50); aR(x + 2, GY - 53);
+    kgL(g, x - 11, GY - 43, x + 15, GY - 49, 4, P.leather); kgL(g, x + 8, GY - 47.6, x + 24, GY - 50.4, 2.4, P.steel);
+    kgR(g, x + 0.4, GY - 58.6, 3.4, 5.2, P.brass); }
+  else if (pose === 'draw' || pose === 'sling'){ aR(x + 6, GY - 66); aL(x - 19, GY - 40);
+    kgL(g, x - 3, GY - 44, x + 9, GY - 72, 4, P.leather); kgL(g, x + 7.4, GY - 68, x + 11, GY - 79, 2.2, P.steel); }
+  else if (pose === 'fixBay'){ aL(x + 13, GY - 56); aR(x + 16.4, GY - 70);
+    kgL(g, x + 15.4, GY - 30, x + 16.4, GY - 76, 3.6, P.leather); kgL(g, x + 16.2, GY - 62, x + 16.6, GY - 84, 1.6, P.steel); }
+  else if (pose === 'attention'){ aL(x - 19.4, GY - 38); aR(x + 19.4, GY - 38); }
+  else if (pose === 'point'){ aL(x - 19, GY - 40); aR(x + 31, GY - 68); }
+  else if (pose === 'observe'){ aL(x - 6, GY - 76); aR(x + 7, GY - 76);
+    kgR(g, x - 6.4, GY - 84.6, 5, 6.4, P.dark); kgR(g, x + 2.4, GY - 84.6, 5, 6.4, P.dark); }
+  else if (pose === 'drag'){ aL(x - 21, GY - 30); aR(x + 21, GY - 30); }
+  else if (pose === 'bow'){ aL(x - 4, GY - 38); aR(x + 4, GY - 38); }
+  else if (pose === 'carry'){ aL(x - 13.4, GY - 44); aR(x + 14.4, GY - 44);
+    kgR(g, x - 13, GY - 53, 27, 17, P.leather); kgR(g, x - 13, GY - 53, 27, 3, P.leatherL);
+    kgL(g, x - 13, GY - 44.6, x + 14, GY - 44.6, 1.4, P.dark); kgE(g, x - 10.4, GY - 49, 1.6, P.steel); kgE(g, x + 11.4, GY - 49, 1.6, P.steel); }
+  else if (pose === 'carryShell'){ aL(x - 8, GY - 42); aR(x + 9, GY - 42);
+    kgE(g, x + 1, GY - 46, 10.6, 4.6, P.brass); kgE(g, x + 10.4, GY - 46, 2.6, P.steel); }
+  else if (pose === 'ram'){ aL(x - 2, GY - 50); aR(x + 8, GY - 54);
+    kgL(g, x - 15, GY - 36, x + 17, GY - 60, 2.6, P.leather); }
+  else if (pose === 'lay'){ aL(x - 6, GY - 44); aR(x + 15, GY - 62); kgR(g, x + 15.4, GY - 66, 4.6, 5.6, P.dark); }
+  else if (pose === 'cook'){ aL(x - 12, GY - 44); aR(x + 11, GY - 62); kgL(g, x + 11, GY - 62, x + 15, GY - 70, 1.6, P.leather); }
+  else if (pose === 'crank'){ aL(x - 8, GY - 44); aR(x + 13, GY - 46);
+    kgR(g, x + 12, GY - 47, 8.4, 11, P.dark); kgE(g, x + 16.2, GY - 49.4, 1.7, P.steel); }
+  else if (pose === 'repair'){ aL(x - 10, GY - 44); aR(x + 14, GY - 63);
+    kgR(g, x + 12.4, GY - 67.4, 5.6, 3, P.steel); }
+  else if (pose === 'barrel'){ aL(x - 14.4, GY - 42); aR(x + 15.4, GY - 42);
+    kgR(g, x - 14, GY - 55, 29, 16.4, P.drum); kgL(g, x - 14, GY - 47, x + 15, GY - 47, 1.6, P.dark); }
+  else { const swA = walking ? -sw * 4 : 0;
+    aL(x - 19 - swA, GY - 40); aR(x + 19 + swA, GY - 40);
+    if (pose === 'stand' && CU.rifle){ kgL(g, x + 21, GY - 40, x + 23, GY - 6, 3.6, P.leather); kgL(g, x + 22, GY - 24, x + 24, GY - 44, 2.2, P.steel); } }
+  /* head */
+  g.save(); g.translate(0, bow);
+  if (CU.scarf) kgR(g, x - 9.4, GY - 80.4, 18.8, 3.4, CU.scarf);
+  kgE(g, x + 1, GY - 84, 7.6, 7.2, P.skin);
+  const bB = CU.beardStyle === 'short' ? -62.5 : -55.4, bW = CU.beardStyle === 'wild' ? 1.5 : 0;
+  g.beginPath(); g.moveTo(x - 8.6 - bW, GY - 82); g.quadraticCurveTo(x - 9.6 - bW, GY - 66, x - 4.6, GY - 61.4 + (bB + 55.4));
+  g.quadraticCurveTo(x, GY + bB, x + 4.6, GY - 61.4 + (bB + 55.4)); g.quadraticCurveTo(x + 9.6 + bW, GY - 66, x + 8.6 + bW, GY - 82);
+  g.quadraticCurveTo(x, GY - 87.6, x - 8.6 - bW, GY - 82); g.fillStyle = B[1]; g.fill();
+  kgClump(g, x, GY - 72, 13 + bW * 4, 20, B, x + 41, 22, 1.5); kgClump(g, x + 4.4, GY - 72, 5, 18, [B[2]], x + 43, 7, 1.5);
+  if (CU.beardStyle === 'braid') kgR(g, x - 4.6, GY - 63.6, 9.2, 1.9, P.brass);
+  if (CU.beardStyle === 'fork'){ g.save(); g.globalCompositeOperation = 'destination-out';
+    g.beginPath(); g.moveTo(x - 2.4, GY - 54.6); g.lineTo(x + 2.4, GY - 54.6); g.lineTo(x, GY - 63); g.closePath(); g.fill(); g.restore(); }
+  if (CU.enemy){ kgR(g, x - 5.4, GY - 86.4, 4.6, 1.7, 'rgba(20,14,8,.55)'); kgR(g, x + 2.4, GY - 86.4, 4.6, 1.7, 'rgba(20,14,8,.55)'); }
+  else { kgE(g, x + 0.6, GY - 80.4, 1.7, 1.3, P.skinD); kgE(g, x - 2.8, GY - 84.6, 1, '#14100c'); kgE(g, x + 4, GY - 84.6, 1, '#14100c'); }
+  kgRim(g, [[x + 8.2, GY - 80], [x + 9.2, GY - 73], [x + 8.6, GY - 68], [x + 5.4, GY - 62.6]]);
+  kgDome(g, x, GY, x);
+  g.restore(); g.restore();
+}
+
+function kgEast(g, x, GY, pose, ph){
+  const P = KG_P, CU = KG_CUR, B = P.beard, t = 1.3 + CU.seedKey;
+  const walking = pose === 'walk', sw = walking ? Math.sin(ph * KGT) : 0;
+  const bob = walking ? Math.abs(Math.sin(ph * KGT)) * -2.2 : Math.sin(t * 1.7 + x) * 0.5;
+  const bow = (pose === 'bow' || pose === 'reload') ? 2.2 : 0;
+  const kneel = KG_KNEEL.includes(pose);
+  kgE2shadow(g, x, GY);
+  g.save(); g.translate(0, bob);
+  if (kneel){ g.beginPath(); g.moveTo(x - 16, GY - 2); g.quadraticCurveTo(x - 14, GY - 24, x - 6, GY - 28);
+    g.lineTo(x + 12, GY - 28); g.quadraticCurveTo(x + 18, GY - 22, x + 19, GY - 2); g.closePath(); g.fillStyle = P.coat; g.fill();
+    kgClump(g, x + 1, GY - 12, 26, 18, [P.coatD, P.coat], x + 19, 10, 1.1); kgR(g, x + 8, GY - 4.6, 12.4, 4.6, P.dark); }
+  else { const fA = sw * 8, fB = -sw * 8;
+    kgL(g, x - 1, GY - 26, x - 1 + fB, GY - 5, 8, P.coatD); kgR(g, x - 4 + fB, GY - 4.6, 13, 4.6, P.dark);
+    kgL(g, x + 1, GY - 26, x + 1 + fA, GY - 5, 8.4, P.trouser);
+    for (let i = 0; i < 3; i++) kgL(g, x - 1.6 + fA, GY - 15 + i * 4.4, x + 4.4 + fA, GY - 15 + i * 4.4, 1.3, P.coatD);
+    kgR(g, x - 2 + fA, GY - 4.6, 13.4, 4.6, P.dark); }
+  kgE(g, x - 14.6, GY - 68, 7, 13, P.leather); kgClump(g, x - 14.6, GY - 68, 9, 22, [P.leatherL, P.leather], x + 61, 7, 1.2);
+  g.beginPath(); g.moveTo(x - 10, GY - 78); g.quadraticCurveTo(x + 1, GY - 81.6, x + 10.6, GY - 77);
+  g.lineTo(x + 11.4, GY - 52); g.lineTo(x + 14 + sw * 1.6, GY - 24.6); g.lineTo(x + 6, GY - 22.8); g.lineTo(x - 4, GY - 25);
+  g.lineTo(x - 13 - sw * 1.2, GY - 23.6); g.lineTo(x - 11.4, GY - 52); g.closePath();
+  g.fillStyle = P.coat; g.fill();
+  g.save(); g.clip(); kgClump(g, x, GY - 52, 22, 52, [P.coatD, P.coat], x + 17, 22, 1.35); kgClump(g, x - 5, GY - 67, 12, 24, [P.coatL], x + 23, 7, 1.2);
+  kgR(g, x - 12, GY - 80, 7, 58, 'rgba(0,0,0,.26)'); g.restore();
+  kgR(g, x - 11.4, GY - 51, 23.4, 3.4, P.dark); kgE(g, x + 1, GY - 49.4, 2, P.brass);
+  kgR(g, x + 6.4, GY - 50, 5.6, 8.6, P.leather);
+  for (const p of CU.patches) kgR(g, x + p.x * 0.5, GY + p.y, p.w * 0.8, p.h, p.tone < 0.5 ? P.coatL : '#8a6c4a');
+  kgE(g, x + 9.2, GY - 59, 4.2, 6.6, P.drum); kgE(g, x + 9.2, GY - 59, 2.4, 4, '#5a564e');
+  if (CU.ember) kgE(g, x + 9.2, GY - 59, 1.4, '#c33d21');
+  g.strokeStyle = P.dark; g.lineWidth = 1.5; g.beginPath(); g.moveTo(x + 9, GY - 65); g.quadraticCurveTo(x + 12.4, GY - 71, x + 8.6, GY - 76.6); g.stroke();
+  kgRim(g, [[x + 10.8, GY - 74], [x + 11.6, GY - 62], [x + 11.8, GY - 56], [x + 13.4, GY - 40], [x + 14.2, GY - 33], [x + 13.8, GY - 26]]);
+  if (CU.trade === 'cook') kgR(g, x + 1, GY - 72, 9.4, 24, P.pale);
+  if (CU.trade === 'medic' || CU.trade === 'bearer'){ kgR(g, x + 9.6, GY - 68, 4.4, 6.4, P.pale); kgE(g, x + 11.8, GY - 64.8, 1.4, P.red); }
+  const aN = (hx, hy) => { kgL(g, x + 2, GY - 72, hx, hy + 4, 8.4, P.coat); kgE(g, hx, hy, 4.6, 5.2, P.leather); };
+  const aF = (hx, hy) => { kgL(g, x - 3, GY - 72, hx, hy + 4, 7.6, P.coatD); kgE(g, hx, hy, 4.2, 4.8, P.leather); };
+  const rifleE = (len) => { kgL(g, x - 2, GY - 60.6, x + 40, GY - 61.6, 4.2, P.leather);
+    kgL(g, x + 30, GY - 61.2, x + (len || 40), GY - 62.2, 2.4, P.steel);
+    if (CU.bayonet) kgL(g, x + (len || 40), GY - 62.2, x + (len || 40) + 9, GY - 62.6, 1.4, P.pale); };
+  if (pose === 'aim' || pose === 'fight'){ rifleE(); aN(x + 24, GY - 59.6); aF(x + 13, GY - 60.6); }
+  else if (pose === 'thrust'){ rifleE(46); aN(x + 26, GY - 59.6); aF(x + 14, GY - 60.6); }
+  else if (pose === 'boltA' || pose === 'boltB'){ rifleE(); aF(x + 13, GY - 60.6);
+    if (pose === 'boltA'){ aN(x + 15, GY - 65); kgE(g, x + 12.6, GY - 66.6, 1.8, P.dark); } else aN(x + 24, GY - 59.6); }
+  else if (pose === 'reload'){ aN(x + 10, GY - 52); aF(x + 2, GY - 54);
+    kgL(g, x - 6, GY - 46, x + 26, GY - 52, 4, P.leather); kgR(g, x + 6, GY - 59, 3.2, 5, P.brass); }
+  else if (pose === 'carry'){ aN(x + 15, GY - 44); aF(x + 12, GY - 46);
+    kgR(g, x + 4, GY - 53, 17, 16, P.leather); kgR(g, x + 4, GY - 53, 17, 3, P.leatherL); }
+  else if (pose === 'carryShell'){ aN(x + 12, GY - 43); aF(x + 8, GY - 45);
+    kgE(g, x + 8, GY - 47, 9, 4.2, P.brass); kgE(g, x + 16, GY - 47, 2.4, P.steel); }
+  else if (pose === 'ram'){ aN(x + 14, GY - 52); aF(x + 4, GY - 48); kgL(g, x - 10, GY - 38, x + 22, GY - 58, 2.6, P.leather); }
+  else if (pose === 'point'){ aN(x + 30, GY - 66); aF(x - 6, GY - 42); }
+  else if (pose === 'observe'){ aN(x + 8, GY - 76); aF(x - 2, GY - 74); kgR(g, x + 3, GY - 84, 6.4, 5.6, P.dark); }
+  else if (pose === 'drag'){ aN(x - 12, GY - 34); aF(x - 14, GY - 36); }
+  else if (pose === 'bow'){ aN(x + 6, GY - 40); aF(x + 2, GY - 40); }
+  else if (pose === 'attention'){ aN(x + 3, GY - 38); aF(x - 5, GY - 38); }
+  else if (pose === 'fixBay'){ aN(x + 14, GY - 68); aF(x + 10, GY - 54);
+    kgL(g, x + 13, GY - 32, x + 14, GY - 76, 3.4, P.leather); kgL(g, x + 13.8, GY - 62, x + 14.4, GY - 84, 1.6, P.steel); }
+  else if (pose === 'draw' || pose === 'sling'){ aN(x + 2, GY - 64); aF(x - 5, GY - 42);
+    kgL(g, x - 12, GY - 46, x - 4, GY - 74, 4, P.leather); }
+  else if (pose === 'lay'){ aN(x + 15, GY - 62); aF(x - 2, GY - 46); kgR(g, x + 15.4, GY - 66, 4.6, 5.6, P.dark); }
+  else if (pose === 'cook'){ aN(x + 12, GY - 60); aF(x - 2, GY - 46); kgL(g, x + 12, GY - 60, x + 16, GY - 68, 1.6, P.leather); }
+  else if (pose === 'crank'){ aN(x + 13, GY - 46); aF(x - 2, GY - 46); kgR(g, x + 12, GY - 47, 8.4, 11, P.dark); }
+  else if (pose === 'repair'){ aN(x + 14, GY - 62); aF(x - 2, GY - 46); kgR(g, x + 12.4, GY - 66.4, 5.6, 3, P.steel); }
+  else if (pose === 'barrel'){ aN(x + 14, GY - 43); aF(x + 10, GY - 45); kgR(g, x + 2, GY - 55, 16, 16.4, P.drum); }
+  else { const gv = [x + 3 - sw * 5, GY - 40]; aN(gv[0], gv[1]); aF(x - 5 - sw * 3, GY - 40);
+    if (pose === 'stand' && CU.rifle){ kgL(g, gv[0] + 3, GY - 40, gv[0] + 5, GY - 8, 3.4, P.leather); kgL(g, gv[0] + 4, GY - 26, gv[0] + 6.6, GY - 45, 2.2, P.steel); } }
+  g.save(); g.translate(0, bow);
+  if (CU.scarf) kgR(g, x - 3, GY - 80.2, 13, 3.2, CU.scarf);
+  kgE(g, x + 3.4, GY - 84, 6.4, 7, P.skin);
+  g.beginPath(); g.moveTo(x - 3.4, GY - 83); g.quadraticCurveTo(x + 10.6, GY - 84, x + 11.6, GY - 72);
+  g.quadraticCurveTo(x + 10.8, GY - 62, x + 6.4, GY - 59); g.quadraticCurveTo(x - 1, GY - 57.4, x - 3, GY - 64);
+  g.quadraticCurveTo(x - 5.4, GY - 74, x - 3.4, GY - 83); g.fillStyle = B[1]; g.fill();
+  kgClump(g, x + 4.6, GY - 71, 11, 19, B, x + 71, 18, 1.5); kgClump(g, x + 8.6, GY - 70, 4.6, 16, [B[2]], x + 73, 6, 1.5);
+  if (CU.beardStyle === 'braid') kgR(g, x + 2, GY - 63.6, 8.6, 1.9, P.brass);
+  if (CU.enemy) kgR(g, x + 4.4, GY - 86.4, 4.4, 1.7, 'rgba(20,14,8,.55)');
+  else { kgE(g, x + 9.4, GY - 80.6, 1.6, 1.2, P.skinD); kgE(g, x + 6.2, GY - 84.8, 1, '#14100c'); }
+  kgRim(g, [[x + 11.2, GY - 76], [x + 11.8, GY - 68], [x + 10.4, GY - 63], [x + 6.8, GY - 59.6]]);
+  kgDome(g, x, GY, x);
+  g.restore(); g.restore();
+}
+function kgE2shadow(g, x, GY){ kgE(g, x, GY + 3, 24, 4.2, 'rgba(10,6,2,.4)'); }
+function kgN(g, x, GY, pose, ph){
+  const P = KG_P, CU = KG_CUR, B = P.beard, t = 1.3 + CU.seedKey;
+  const walking = pose === 'walk', sw = walking ? Math.sin(ph * KGT) : 0;
+  const bob = walking ? Math.abs(Math.sin(ph * KGT)) * -2 : Math.sin(t * 1.7 + x) * 0.5;
+  kgE(g, x, GY + 3, 24, 4.2, 'rgba(10,6,2,.4)');
+  g.save(); g.translate(0, bob);
+  const lY = sw > 0 ? -1.4 : 0, rY = sw > 0 ? 0 : -1.4;
+  kgL(g, x - 7, GY - 26, x - 7.6, GY - 5 + lY, 8.4, P.trouser); kgL(g, x + 7, GY - 26, x + 7.6, GY - 5 + rY, 8.4, P.trouser);
+  kgR(g, x - 13.6, GY - 4.6 + lY, 12.4, 4.6, P.dark); kgR(g, x + 1.2, GY - 4.6 + rY, 12.4, 4.6, P.dark);
+  const swA = walking ? sw * 3 : 0;
+  kgL(g, x - 15, GY - 73, x - 19 + swA, GY - 36, 8.6, P.coatD); kgE(g, x - 19 + swA, GY - 40, 4.6, 5.2, P.leather);
+  kgL(g, x + 15, GY - 73, x + 19 - swA, GY - 36, 8.6, P.coat); kgE(g, x + 19 - swA, GY - 40, 4.6, 5.2, P.leather);
+  g.beginPath(); g.moveTo(x - 17, GY - 78); g.quadraticCurveTo(x, GY - 82, x + 17, GY - 78);
+  g.lineTo(x + 16, GY - 52); g.lineTo(x + 20, GY - 24.6); g.lineTo(x + 11, GY - 22.8); g.lineTo(x + 2, GY - 25.2);
+  g.lineTo(x - 6, GY - 22.6); g.lineTo(x - 13, GY - 25); g.lineTo(x - 20, GY - 23.8); g.lineTo(x - 16, GY - 52); g.closePath();
+  g.fillStyle = P.coat; g.fill();
+  g.save(); g.clip(); kgClump(g, x - 2, GY - 52, 30, 52, [P.coatD, P.coat], x + 107, 26, 1.35); kgClump(g, x + 6, GY - 66, 14, 26, [P.coatL], x + 113, 8, 1.2);
+  kgR(g, x + 10.4, GY - 80, 8.4, 58, 'rgba(0,0,0,.24)'); g.restore();
+  kgE(g, x, GY - 66, 10.6, 14.6, P.leather); kgClump(g, x, GY - 66, 16, 25, [P.leatherL, P.leather], x + 121, 12, 1.1);
+  kgL(g, x - 10, GY - 74, x + 10, GY - 58, 1.8, P.dark); kgL(g, x + 10, GY - 74, x - 10, GY - 58, 1.8, P.dark);
+  kgR(g, x - 8, GY - 46, 16, 10, P.leather); kgR(g, x - 8, GY - 46, 16, 2.6, P.leatherL);
+  kgR(g, x - 17.4, GY - 51, 34.8, 3.4, P.dark);
+  for (const p of CU.patches) kgR(g, x + p.x, GY + p.y, p.w, p.h, p.tone < 0.5 ? P.coatL : '#8a6c4a');
+  if ((pose === 'aim' || pose === 'fight' || pose === 'thrust') && CU.rifle){
+    kgL(g, x - 4, GY - 70, x - 13, GY - 82, 3.8, P.leather); kgL(g, x - 11, GY - 79, x - 19, GY - 88, 2.2, P.steel);
+    if (CU.bayonet) kgL(g, x - 19, GY - 88, x - 25, GY - 92, 1.3, P.pale); }
+  if (pose === 'carry'){ kgR(g, x - 19.4, GY - 52, 4.4, 15, P.leather); kgR(g, x + 15, GY - 52, 4.4, 15, P.leather); }
+  kgRim(g, [[x + 16.8, GY - 76], [x + 17.4, GY - 64], [x + 17.2, GY - 58], [x + 19.4, GY - 40], [x + 19.8, GY - 33], [x + 19.2, GY - 26]]);
+  if (CU.scarf) kgR(g, x - 9.4, GY - 80.6, 18.8, 3.2, CU.scarf);
+  kgClump(g, x - 8.8, GY - 76, 3.6, 10, [B[1]], x + 131, 5, 1.5); kgClump(g, x + 8.8, GY - 76, 3.6, 10, [B[1]], x + 137, 5, 1.5);
+  if (CU.enemy){ g.fillStyle = P.coatD; g.beginPath(); g.ellipse(x + 0.6, GY - 88.6, 10.2, 7.6, 0, Math.PI, 0); g.fill();
+    kgR(g, x - 10.4, GY - 89.2, 23.2, 2.8, P.coatD); kgR(g, x - 10.4, GY - 89.2, 4.2, 6.4, P.coatD); }
+  else kgDome(g, x, GY, x);
+  g.restore();
+}
+
+function kgSitE(g, x, GY, pose){
+  const P = KG_P, CU = KG_CUR, B = P.beard;
+  kgE(g, x, GY + 3, 27, 4.4, 'rgba(10,6,2,.4)');
+  kgE(g, x - 15, GY - 64, 6.6, 12, P.leather); kgClump(g, x - 15, GY - 64, 8, 20, [P.leatherL, P.leather], x + 61, 6, 1.2);
+  g.beginPath(); g.moveTo(x - 12, GY - 76); g.quadraticCurveTo(x + 1, GY - 79.6, x + 11, GY - 75);
+  g.lineTo(x + 12, GY - 44); g.lineTo(x - 11, GY - 44); g.closePath(); g.fillStyle = P.coat; g.fill();
+  g.save(); g.clip(); kgClump(g, x - 2, GY - 60, 20, 34, [P.coatD, P.coat], x + 17, 16, 1.35); kgR(g, x - 12.4, GY - 78, 6.4, 36, 'rgba(0,0,0,.24)'); g.restore();
+  kgE(g, x + 8.6, GY - 57, 4, 6.2, P.drum); kgE(g, x + 8.6, GY - 57, 2.2, 3.6, '#5a564e');
+  if (CU.ember) kgE(g, x + 8.6, GY - 57, 1.3, '#c33d21');
+  kgRim(g, [[x + 11, GY - 72], [x + 11.8, GY - 60], [x + 11.6, GY - 54], [x + 12.2, GY - 47]]);
+  g.beginPath(); g.moveTo(x - 12, GY - 45); g.lineTo(x + 12, GY - 45);
+  g.quadraticCurveTo(x + 22, GY - 26, x + 24, GY - 3); g.lineTo(x - 23, GY - 3);
+  g.quadraticCurveTo(x - 22, GY - 26, x - 12, GY - 45); g.closePath(); g.fillStyle = P.coat; g.fill();
+  g.save(); g.clip(); kgClump(g, x, GY - 22, 38, 36, [P.coatD, P.coat], x + 19, 20, 1.1); kgR(g, x - 23, GY - 45, 8, 44, 'rgba(0,0,0,.22)'); g.restore();
+  kgR(g, x + 12, GY - 5, 12.6, 4.4, P.dark); kgR(g, x - 2, GY - 4.4, 11, 4.2, P.dark);
+  g.save(); g.translate(0, 3);
+  kgE(g, x + 3.4, GY - 82, 6.4, 7, P.skin);
+  g.beginPath(); g.moveTo(x - 3.4, GY - 81); g.quadraticCurveTo(x + 10.6, GY - 82, x + 11.6, GY - 70);
+  g.quadraticCurveTo(x + 10.8, GY - 60, x + 6.4, GY - 57); g.quadraticCurveTo(x - 1, GY - 55.4, x - 3, GY - 62);
+  g.quadraticCurveTo(x - 5.4, GY - 72, x - 3.4, GY - 81); g.fillStyle = B[1]; g.fill();
+  kgClump(g, x + 4.6, GY - 69, 11, 19, B, x + 71, 18, 1.5); kgClump(g, x + 8.6, GY - 68, 4.6, 16, [B[2]], x + 73, 6, 1.5);
+  if (CU.enemy) kgR(g, x + 4.4, GY - 84.4, 4.4, 1.7, 'rgba(20,14,8,.55)'); else kgE(g, x + 9.4, GY - 78.6, 1.6, 1.2, P.skinD);
+  kgDome(g, x - 1, GY - 2, x);
+  g.restore();
+  if (pose === 'clean'){
+    kgL(g, x - 4, GY - 42, x + 32, GY - 46, 4.2, P.leather); kgL(g, x + 22, GY - 45.2, x + 44, GY - 47, 2.2, P.steel);
+    kgL(g, x + 6, GY - 68, x + 17, GY - 45, 7.6, P.coat); kgE(g, x + 18, GY - 44.4, 4.2, 4.8, P.leather);
+    const sx = Math.sin(CU.seedKey * 2.3) * 3;
+    kgL(g, x + 4, GY - 66, x + 2 + sx, GY - 42, 7.6, P.coatD); kgE(g, x + 2 + sx, GY - 41.4, 4.6, 3.4, P.pale);
+  } else if (CU.paper){
+    kgR(g, x + 0.4, GY - 47, 13, 9.4, P.pale); kgR(g, x + 0.4, GY - 47, 13, 1.8, '#b8b09a');
+    kgL(g, x + 3, GY - 68, x + 1, GY - 41, 7.6, P.coatD); kgE(g, x + 1, GY - 40.4, 4.2, 4.8, P.leather);
+    kgL(g, x + 5, GY - 68, x + 11, GY - 40, 7.6, P.coat); kgE(g, x + 11.4, GY - 39.4, 4.2, 4.8, P.leather);
+  } else {
+    kgL(g, x + 3, GY - 68, x + 1, GY - 41, 7.6, P.coatD); kgE(g, x + 1, GY - 40.4, 4.2, 4.8, P.leather);
+    kgL(g, x + 5, GY - 68, x + 11, GY - 40, 7.6, P.coat); kgE(g, x + 11.4, GY - 39.4, 4.2, 4.8, P.leather); }
+}
+function kgSitS(g, x, GY, pose){
+  const P = KG_P, CU = KG_CUR, B = P.beard;
+  kgE(g, x, GY + 3, 28, 4.4, 'rgba(10,6,2,.4)');
+  g.beginPath(); g.moveTo(x - 14, GY - 76); g.quadraticCurveTo(x, GY - 80, x + 14, GY - 76);
+  g.lineTo(x + 13, GY - 44); g.lineTo(x - 13, GY - 44); g.closePath(); g.fillStyle = P.coat; g.fill();
+  g.save(); g.clip(); kgClump(g, x - 2, GY - 60, 24, 34, [P.coatD, P.coat], x + 17, 16, 1.35); kgR(g, x + 8, GY - 78, 7, 36, 'rgba(0,0,0,.24)'); g.restore();
+  kgE(g, x + CU.drumSide * 0.4, GY - 58, 6.6, 6.6, P.drum); kgE(g, x + CU.drumSide * 0.4, GY - 58, 4, 4, '#5a564e');
+  if (CU.ember) kgE(g, x + CU.drumSide * 0.4, GY - 58, 1.5, '#c33d21');
+  kgR(g, x - 13.4, GY - 46, 26.8, 3.2, P.dark);
+  g.beginPath(); g.moveTo(x - 13, GY - 45); g.lineTo(x + 13, GY - 45);
+  g.quadraticCurveTo(x + 25, GY - 24, x + 26, GY - 3); g.lineTo(x - 25, GY - 3);
+  g.quadraticCurveTo(x - 24, GY - 24, x - 13, GY - 45); g.closePath(); g.fillStyle = P.coat; g.fill();
+  g.save(); g.clip(); kgClump(g, x, GY - 22, 42, 36, [P.coatD, P.coat], x + 19, 20, 1.1); g.restore();
+  kgR(g, x - 16, GY - 5, 12.4, 4.4, P.dark); kgR(g, x + 4, GY - 5, 12.4, 4.4, P.dark);
+  g.save(); g.translate(0, 3);
+  kgE(g, x + 1, GY - 82, 7.6, 7.2, P.skin);
+  g.beginPath(); g.moveTo(x - 8.6, GY - 80); g.quadraticCurveTo(x - 9.6, GY - 64, x - 4.6, GY - 59.4);
+  g.quadraticCurveTo(x, GY - 53.4, x + 4.6, GY - 59.4); g.quadraticCurveTo(x + 9.6, GY - 64, x + 8.6, GY - 80);
+  g.quadraticCurveTo(x, GY - 85.6, x - 8.6, GY - 80); g.fillStyle = B[1]; g.fill();
+  kgClump(g, x, GY - 70, 13, 20, B, x + 41, 20, 1.5);
+  if (CU.enemy) { kgR(g, x - 5.4, GY - 84.4, 4.6, 1.7, 'rgba(20,14,8,.55)'); kgR(g, x + 2.4, GY - 84.4, 4.6, 1.7, 'rgba(20,14,8,.55)'); }
+  kgDome(g, x, GY - 2, x);
+  g.restore();
+  if (pose === 'clean'){
+    kgL(g, x - 12, GY - 40, x + 14, GY - 43, 4, P.leather); kgL(g, x + 8, GY - 42.4, x + 22, GY - 44, 2.2, P.steel);
+    kgL(g, x - 11, GY - 66, x - 4, GY - 42, 7.6, P.coatD); kgE(g, x - 3.4, GY - 41.4, 4.2, 4.8, P.leather);
+    kgL(g, x + 11, GY - 66, x + 4, GY - 44, 7.6, P.coat); kgE(g, x + 3.4, GY - 43.4, 4.4, 3.2, P.pale);
+  } else if (CU.paper){
+    kgR(g, x - 10, GY - 60, 20, 15.4, P.pale); kgR(g, x - 10, GY - 60, 20, 2, '#b8b09a');
+    g.strokeStyle = 'rgba(90,80,60,.55)'; g.lineWidth = 0.8;
+    for (let i = 0; i < 3; i++){ g.beginPath(); g.moveTo(x - 7.4, GY - 55.6 + i * 3.4); g.lineTo(x + 5 + (i % 2) * 2.4, GY - 55.6 + i * 3.4); g.stroke(); }
+    kgL(g, x - 12, GY - 68, x - 9, GY - 49, 7.6, P.coatD); kgE(g, x - 9, GY - 48.4, 4.2, 4.8, P.leather);
+    kgL(g, x + 12, GY - 68, x + 10, GY - 49, 7.6, P.coat); kgE(g, x + 10, GY - 48.4, 4.2, 4.8, P.leather);
+  } else {
+    kgL(g, x - 12, GY - 68, x - 5, GY - 42, 7.6, P.coatD); kgE(g, x - 4.6, GY - 41.4, 4.2, 4.8, P.leather);
+    kgL(g, x + 12, GY - 68, x + 5, GY - 42, 7.6, P.coat); kgE(g, x + 4.6, GY - 41.4, 4.2, 4.8, P.leather); }
+}
+function kgDown(g, x, GY, sleep){
+  const P = KG_P, CU = KG_CUR, B = P.beard;
+  kgE(g, x, GY + 3, 44, 4.6, 'rgba(10,6,2,.4)');
+  kgR(g, x - 44, GY - 10, 15, 10, P.leather);
+  g.beginPath(); g.moveTo(x - 30, GY - 2); g.lineTo(x - 30, GY - 11);
+  g.quadraticCurveTo(x - 4, GY - 15.4, x + 22, GY - 11.6);
+  g.quadraticCurveTo(x + 36, GY - 9, x + 37, GY - 2); g.closePath(); g.fillStyle = P.coat; g.fill();
+  g.save(); g.clip(); kgClump(g, x + 2, GY - 8, 56, 9, [P.coatD, P.coat], 77 + CU.seedKey, 16, 0.25);
+  if (sleep){ kgR(g, x - 8, GY - 15, 19, 13.4, '#6f6353'); kgR(g, x - 8, GY - 15, 19, 2.4, '#857a66'); }
+  g.restore();
+  kgR(g, x + 35, GY - 6.4, 11, 4.4, P.dark); kgR(g, x + 36.6, GY - 10.4, 10, 4.2, P.dark);
+  kgE(g, x - 33, GY - 12.4, 6.8, 6, P.skin);
+  kgE(g, x - 28.4, GY - 9.4, 6.4, 5, B[1]); kgClump(g, x - 28, GY - 9, 10, 8, B, 91 + CU.seedKey, 8, 0.9);
+  if (sleep){ g.fillStyle = P.coatD; g.beginPath(); g.ellipse(x - 44, GY - 3.4, 8.6, 3.4, 0, 0, KGT); g.fill();
+    if (!CU.enemy) kgE(g, x - 44, GY - 5.4, 1.4, '#ffd98a'); }
+  else kgE(g, x - 35.4, GY - 14.6, 1.1, '#14100c');
+}
+function kgProne(g, x, GY){
+  const P = KG_P, CU = KG_CUR, B = P.beard;
+  kgE(g, x, GY + 3, 44, 4.6, 'rgba(10,6,2,.4)');
+  g.beginPath(); g.moveTo(x - 40, GY - 2); g.lineTo(x - 40, GY - 9);
+  g.quadraticCurveTo(x - 8, GY - 13.4, x + 20, GY - 10.4);
+  g.quadraticCurveTo(x + 34, GY - 8, x + 35, GY - 2); g.closePath(); g.fillStyle = P.coat; g.fill();
+  g.save(); g.clip(); kgClump(g, x - 2, GY - 7, 58, 8, [P.coatD, P.coat], 55 + CU.seedKey, 14, 0.25); g.restore();
+  kgR(g, x - 44, GY - 6.4, 11, 4.4, P.dark); kgR(g, x - 43, GY - 10.2, 10, 4.2, P.dark);
+  kgE(g, x - 20, GY - 12, 8.6, 5.4, P.leather);
+  kgE(g, x + 27, GY - 13.4, 6.6, 6.2, P.skin);
+  kgE(g, x + 24.6, GY - 9.6, 5.6, 4.6, B[1]); kgClump(g, x + 24.6, GY - 10, 9, 7, B, 61 + CU.seedKey, 7, 0.9);
+  g.fillStyle = P.coatD; g.beginPath(); g.ellipse(x + 27.4, GY - 19.6, 8.2, 4.2, 0, Math.PI, 0); g.fill();
+  kgR(g, x + 19.4, GY - 19.8, 17.4, 2.2, P.coatD);
+  kgL(g, x + 18, GY - 8.6, x + 40, GY - 9.6, 3.4, P.leather); kgL(g, x + 34, GY - 9.3, x + 48, GY - 10, 2, P.steel);
+  if (CU.bayonet) kgL(g, x + 48, GY - 10, x + 55, GY - 10.4, 1.3, P.pale);
+  kgE(g, x + 16, GY - 6.4, 4.4, 3.4, P.leather);
+}
+const KG_BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+function kgHexRgb(h){ return [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)]; }
+function kgPixelPass(cv, look){
+  const g = cv.getContext('2d'), W = cv.width, H = cv.height;
+  const img = g.getImageData(0, 0, W, H), d = img.data;
+  const jr = mulberry32(look.jit);
+  const jitMap = new Uint8Array(W * H);
+  for (let i = 0; i < W * H; i++){ const r = jr(); jitMap[i] = r < 0.03 ? 1 : (r < 0.05 ? 2 : 0); }
+  const pal = [look.coat[0], look.coat[1], look.coat[2], '#554636', '#241d13', '#7d5c36', '#99744a', '#cfa146', '#3b3831', '#5a564e',
+    look.skin, '#96683f', look.beard[0], look.beard[1], look.beard[2], '#ffd98a', '#14100c', '#ddd6c4', '#b03024', '#c33d21', '#6f6353', '#857a66'].map(kgHexRgb);
+  if (look.scarf) pal.push(kgHexRgb(look.scarf));
+  const isOp = i => d[i * 4 + 3] > 90;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++){
+    const i = y * W + x, o = i * 4;
+    if (jitMap[i] === 1 && isOp(i)){ d[o + 3] = 0; continue; }
+    if (jitMap[i] === 2 && !isOp(i)){
+      const nb = [i - 1, i + 1, i - W, i + W].find(j => j >= 0 && j < W * H && isOp(j));
+      if (nb !== undefined){ d[o] = d[nb * 4]; d[o + 1] = d[nb * 4 + 1]; d[o + 2] = d[nb * 4 + 2]; d[o + 3] = 255; } }
+    if (d[o + 3] <= 90){ d[o + 3] = 0; continue; }
+    const b = (KG_BAYER[(x & 3) + ((y & 3) << 2)] / 15 - 0.5) * 10;
+    let r = d[o] * 1.09 + b, gg = d[o + 1] * 1.09 + b, bb = d[o + 2] * 1.09 + b, best = 1e12, bi = 0;
+    for (let k = 0; k < pal.length; k++){ const dr = r - pal[k][0], dg = gg - pal[k][1], db = bb - pal[k][2], dd = dr * dr + dg * dg + db * db; if (dd < best){ best = dd; bi = k; } }
+    d[o] = pal[bi][0]; d[o + 1] = pal[bi][1]; d[o + 2] = pal[bi][2]; d[o + 3] = 255; }
+  g.putImageData(img, 0, 0);
+}
+function kgSprite(s, pose, F){
+  const look = kgLook(s);
+  look.paper = (s.vigPose === 'cards' || s.vigPose === 'read');
+  look.rifle = ['rifle', 'sent', 'sapper'].includes(s.trade) || !!s.enemy;
+  KG_CUR = look; KG_P = kgPalette(look);
+  const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+  let cv;
+  if (pose === 'down' || pose === 'sleep' || pose === 'prone'){
+    cv = mk(104, 46); const g = cv.getContext('2d');
+    g.translate(cv.width / 2, cv.height); g.scale(cv.width / 120 * look.girth, cv.height / 56); g.translate(-60, -56);
+    if (pose === 'prone') kgProne(g, 60, 48); else kgDown(g, 60, 48, pose === 'sleep');
+  } else if (pose === 'clean' || pose === 'sit'){
+    cv = mk(76, 104); const g = cv.getContext('2d');
+    g.translate(cv.width / 2, cv.height); const ks = cv.height / 120; g.scale(ks * look.girth, ks * look.height); g.translate(-60, -120);
+    if (F === 'E') kgSitE(g, 60, 112, pose); else kgSitS(g, 60, 112, pose);
+  } else {
+    cv = mk(76, 104); const g = cv.getContext('2d');
+    g.translate(cv.width / 2, cv.height); const ks = cv.height / 120; g.scale(ks * look.girth, ks * look.height); g.translate(-60, -120);
+    const ph = pose === 'walkA' ? 0 : pose === 'walkA2' ? 0.25 : pose === 'walkB' ? 0.5 : pose === 'walkB2' ? 0.75 : 0;
+    const p2 = pose.indexOf('walk') === 0 ? 'walk' : pose;
+    if (F === 'E') kgEast(g, 60, 112, p2, ph); else if (F === 'N') kgN(g, 60, 112, p2, ph); else kgS(g, 60, 112, p2, ph);
+  }
+  kgPixelPass(cv, look);
+  return cv;
+}
+
 function pawnSprite(s, pose, F){
-  const key = [s.enemy ? 'E' : 'F', s.trade, s.scarf, s.rank, pose, F, s.variant || 0, s.squadMark || 0,
-    (s.bayonet && ['aim', 'boltA', 'boltB', 'fight', 'thrust'].includes(pose)) ? 'B' : '',
-    (pose === 'stand' || pose.indexOf('walk') === 0) ? (s.weapon || 'back') : ''].join('|');
+  const key = ['KG', s.enemy ? 'E' : 'F', s.id, pose, F, s.squadMark || 0, s.bayonet ? 'B' : '',
+    (pose === 'stand' || pose.indexOf('walk') === 0) ? (s.weapon || 'back') : '', s.vigPose || ''].join('|');
   if (pawnCache.has(key)) return pawnCache.get(key);
-  const spr = (pose === 'down' || pose === 'sleep') ? buildDownCanvas(s, pose === 'sleep') : pose === 'prone' ? buildProneCanvas(s) : buildPawnCanvas(s, pose, F);
+  const spr = kgSprite(s, pose, F);
+  if (pawnCache.size > 2600) pawnCache.clear();
   pawnCache.set(key, spr); return spr;
 }
 function buildPawnCanvas(s, pose, F){
@@ -3183,7 +3635,7 @@ function newSim(planetName, seedStr){
     jobs: [], jobT: 0, projT: 25, project: null, sapDone: false, sapPost: null, avgDamage: 0,
     directorT: 14, shake: 0, df: 0, speedK: 1, dawnDone: false, pendingRookie: 0, rookieGreeter: 0,
     stars: Array.from({ length: 120 }, () => ({ x: rng(), y: rng() * 0.55, r: rr(0.8, 1.9), b: rr(0.4, 1) })),
-    ledger: [], intel: [{ dmg: 0, ammo: 8, t: 0 }, { dmg: 0, ammo: 8, t: 0 }, { dmg: 0, ammo: 8, t: 0 }], intelWire: { down: false, t: 0 }, inflight: [], radioRetry: [], repT: 25, wireCut: null, order: null, pendingAssign: null, queue: [], freshScars: {}, works: null, works2: null, worksCycle: 0, searchlights: [], moonOff: hash2(hashStr(seedStr + '|' + planetName), 5.1) * 29.5, cat: { fx: 44.5, fy: 36.4, z: 0, mode: 'sit', t: 3, tx: 44.5, ty: 36.4, faceA: 0 },
+    ledger: [], intel: [{ dmg: 0, ammo: 8, t: 0 }, { dmg: 0, ammo: 8, t: 0 }, { dmg: 0, ammo: 8, t: 0 }], intelWire: { down: false, t: 0 }, inflight: [], radioRetry: [], repT: 25, wireCut: null, order: null, pendingAssign: null, queue: [], freshScars: {}, works: null, works2: null, worksCycle: 0, searchlights: [], seedStr, planetName, moonOff: hash2(hashStr(seedStr + '|' + planetName), 5.1) * 29.5, cat: { fx: 44.5, fy: 36.4, z: 0, mode: 'sit', t: 3, tx: 44.5, ty: 36.4, faceA: 0 },
     bunkTaken: new Set(), bedTaken: new Set(), bearerJobs: [], spotted: null,
     missionQ: [], emMissionQ: [], dramaT: rr(26, 44), orderT: rr(50, 90), logisticsT: 4, batteryT: 2, talkT: 6,
     cart: { active: false, fx: -6, dir: 1, t: rr(24, 44) },
