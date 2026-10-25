@@ -1,0 +1,1030 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Trench</title>
+<style>
+  html, body { margin:0; padding:0; background:#060607; height:100%; overflow:hidden;
+    font-family: Georgia, 'Times New Roman', serif; }
+  #stage { position:fixed; inset:0; }
+  canvas { display:block; touch-action:none; width:100%; height:100%; }
+  #setup { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center;
+    justify-content:center; background:#060607; color:#d8d2c4; z-index:5; padding:24px;
+    box-sizing:border-box; text-align:center; }
+  #setup h1 { font-weight:normal; letter-spacing:.35em; font-size:20px; margin:0 0 6px; color:#e8e2d2; }
+  #setup p { margin:0 0 30px; font-size:13px; color:#8b8578; letter-spacing:.08em; }
+  #setup label { display:block; font-size:11px; letter-spacing:.25em; color:#8b8578; margin:18px 0 8px; }
+  #setup input { background:#141419; border:1px solid #33333d; color:#e8e2d2; font-family:inherit;
+    font-size:17px; padding:10px 14px; width:min(320px, 82vw); text-align:center; border-radius:3px; outline:none; }
+  #setup input:focus { border-color:#6b6b78; }
+  #begin { margin-top:34px; background:none; border:1px solid #55555f; color:#e8e2d2;
+    font-family:inherit; font-size:14px; letter-spacing:.3em; padding:12px 38px 12px 41px; cursor:pointer; border-radius:3px; }
+  #begin:hover { background:#1b1b21; }
+  #dice { margin-top:14px; background:none; border:none; color:#8b8578; font-family:inherit;
+    font-size:12px; letter-spacing:.15em; cursor:pointer; }
+  #dice:hover { color:#d8d2c4; }
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="cv"></canvas></div>
+<div id="setup">
+  <h1>TRENCH</h1>
+  <p>a war you only watch</p>
+  <label for="planet">PLANET NAME</label>
+  <input id="planet" type="text" maxlength="24" autocomplete="off" spellcheck="false">
+  <label for="seed">SEED</label>
+  <input id="seed" type="text" maxlength="24" autocomplete="off" spellcheck="false">
+  <button id="begin">BEGIN</button>
+  <button id="dice">random seed</button>
+</div>
+
+<script>
+'use strict';
+/* ================= deterministic RNG ================= */
+function hashStr(s){ let h = 2166136261 >>> 0; for (let i=0;i<s.length;i++){ h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+function mulberry32(a){ return function(){ a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+let rng = mulberry32(1);
+const rr = (a,b)=> a + rng()*(b-a), ri = (a,b)=> Math.floor(rr(a, b+0.999)), pick = arr => arr[Math.floor(rng()*arr.length) % arr.length];
+const clamp = (v,a,b)=> Math.max(a, Math.min(b, v)), lerp = (a,b,k)=> a+(b-a)*k;
+function hash2(x, y){ const h = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return h - Math.floor(h); }
+function vnoise(x, y){ const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
+  const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+  return lerp(lerp(hash2(xi, yi), hash2(xi + 1, yi), u), lerp(hash2(xi, yi + 1), hash2(xi + 1, yi + 1), u), v); }
+
+/* ================= canvas: full-bleed, DPR-aware ================= */
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+let VW = 1280, VH = 720, DPR = 1;
+function fit(){
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  VW = window.innerWidth; VH = window.innerHeight;
+  cv.width = Math.round(VW * DPR); cv.height = Math.round(VH * DPR);
+  baseZoom = VW < VH ? clamp(Math.max(VW / 680, VH / 1180), 0.55, 0.95) : clamp(VW / 1250, 0.7, 1.05);  // portrait: fit the field's height, roam its width
+  if (cam.mode === 'director') cam.zoom += (baseZoom * cam.dzoom - cam.zoom) * 0.5;
+}
+let baseZoom = 1;
+addEventListener('resize', fit);
+
+/* ================= iso projection ================= */
+const TW = 64, TH = 32, ZH = 19;                               // tile w/h, px per z level
+const MW = 42, MH = 27;                                        // map size in tiles
+function isoX(fx, fy){ return (fx - fy) * TW / 2; }
+function isoY(fx, fy, z){ return (fx + fy) * TH / 2 - (z || 0) * ZH; }
+
+/* ================= camera: user's hands, director at idle ================= */
+const cam = { x: 224, y: 520, zoom: 1, mode: 'director', idleT: 0, tx: 224, ty: 520, dzoom: 1, focusT: 0 };
+const IDLE_DIRECTOR_S = 9;
+function camDirector(dt){
+  cam.focusT -= dt;
+  if (cam.focusT <= 0){ cam.focusT = rr(13, 22);
+    const foci = [ [224, 535, 1], [-192, 451, 1.3], [352, 451, 1.28], [166, 520, 1.18],
+                   [496, 392, 1.05], [-480, 432, 1.2], [32, 590, 1.32], [60, 470, 1.08] ];
+    const f = pick(foci); cam.tx = f[0] + rr(-26, 26); cam.ty = f[1] + rr(-14, 14); cam.dzoom = f[2]; }
+  const k = Math.min(1, dt * 0.3);
+  cam.x = lerp(cam.x, cam.tx, k); cam.y = lerp(cam.y, cam.ty, k);
+  cam.zoom = lerp(cam.zoom, baseZoom * cam.dzoom, Math.min(1, dt * 0.5));
+}
+function camUpdate(dt){
+  if (cam.mode === 'user'){ cam.idleT += dt;
+    if (cam.idleT > IDLE_DIRECTOR_S){ cam.mode = 'director'; cam.tx = cam.x; cam.ty = cam.y; cam.focusT = 0; } }
+  else camDirector(dt);
+  cam.x = clamp(cam.x, -760, 1150); cam.y = clamp(cam.y, 180, 860);
+  cam.zoom = clamp(cam.zoom, 0.55, 3.2);
+}
+function toScreen(wx, wy){ return [ (wx - cam.x) * cam.zoom + VW/2, (wy - cam.y) * cam.zoom + VH/2 ]; }
+/* pointer control: drag pans, wheel zooms, pinch zooms */
+const pointers = new Map(); let pinchD = 0;
+function userGrab(){ cam.mode = 'user'; cam.idleT = 0; }
+cv.addEventListener('pointerdown', e => { pointers.set(e.pointerId, [e.clientX, e.clientY]); userGrab();
+  if (pointers.size === 2){ const p = [...pointers.values()]; pinchD = Math.hypot(p[0][0]-p[1][0], p[0][1]-p[1][1]); } });
+cv.addEventListener('pointermove', e => { if (!pointers.has(e.pointerId)) return;
+  const prev = pointers.get(e.pointerId); pointers.set(e.pointerId, [e.clientX, e.clientY]); userGrab();
+  if (pointers.size === 1){ cam.x -= (e.clientX - prev[0]) / cam.zoom; cam.y -= (e.clientY - prev[1]) / cam.zoom; }
+  else if (pointers.size === 2){ const p = [...pointers.values()];
+    const d = Math.hypot(p[0][0]-p[1][0], p[0][1]-p[1][1]);
+    if (pinchD > 0) cam.zoom = clamp(cam.zoom * d / pinchD, 0.55, 3.2); pinchD = d; } });
+['pointerup','pointercancel'].forEach(ev => cv.addEventListener(ev, e => { pointers.delete(e.pointerId); pinchD = 0; }));
+cv.addEventListener('wheel', e => { e.preventDefault(); userGrab();
+  cam.zoom = clamp(cam.zoom * (e.deltaY < 0 ? 1.09 : 0.92), 0.55, 3.2); }, { passive: false });
+
+/* ================= palette ================= */
+let PAL = null;
+function makePalette(){
+  const families = [
+    { sky:[196,32,26], soil:[88,26,25],  accent:[38,95,55]  },
+    { sky:[222,28,27], soil:[210,18,23], accent:[28,90,55]  },
+    { sky:[18,38,26],  soil:[24,30,24],  accent:[190,85,55] },
+    { sky:[268,26,24], soil:[262,16,22], accent:[44,92,55]  },
+    { sky:[150,22,26], soil:[95,20,23],  accent:[16,88,52]  } ];
+  const f = pick(families), hsl = (h,s,l)=>`hsl(${h},${s}%,${l}%)`;
+  return { skyDay: hsl(f.sky[0], f.sky[1] - 8, 50), skyNight: hsl(f.sky[0], 30, 6),
+    soilC: [f.soil[0], f.soil[1], f.soil[2]], grassC: [f.soil[0] + 30, 18, f.soil[2] + 4],
+    soil: hsl(f.soil[0], f.soil[1], f.soil[2]), freshSoil: hsl(f.soil[0], f.soil[1] - 4, f.soil[2] + 9), soilDark: hsl(f.soil[0], f.soil[1], f.soil[2]-6),
+    soilDeep: hsl(f.soil[0], f.soil[1], Math.max(4, f.soil[2]-11)),
+    grass: hsl(f.soil[0]+30, 18, f.soil[2]+4),
+    timber: hsl(32, 30, 34), timberDark: hsl(32, 28, 22), cloth: hsl(f.soil[0]+20, 12, 42),
+    uniform: hsl(f.soil[0]+8, 16, 38), uniformDark: hsl(f.soil[0]+8, 16, 26),
+    skin: hsl(28, 42, 60), skinDark: hsl(28, 36, 48),
+    accent: hsl(f.accent[0], f.accent[1], f.accent[2]), accent2: hsl((f.accent[0]+150)%360, 80, 58),
+    moon: hsl(f.sky[0], 20, 84) };
+}
+fit();
+
+/* ================= the field ================= */
+const DAY_LEN = 110;
+let sim = null, perfT = 0, simLight = 1;
+const trenchY = gx => 13 + (Math.floor(gx / 4) % 2 ? 1 : 0);
+const enemyY  = gx => 4 + (Math.floor(gx / 5) % 2 ? 1 : 0);
+function tileAt(gx, gy){ return (gx < 0 || gy < 0 || gx >= MW || gy >= MH) ? null : sim.grid[gy][gx]; }
+function buildMap(){
+  const grid = [];
+  for (let gy = 0; gy < MH; gy++){ grid.push([]);
+    for (let gx = 0; gx < MW; gx++) grid[gy].push({ gx, gy, z: 0, type: 'ground',
+      damage: 0, patched: 0, chips: 0, stain: 0, worn: 0, rubble: 0, filled: false, sap: false, fitted: false }); }
+  const set = (gx, gy, type, z) => { const t = grid[gy] && grid[gy][gx]; if (t){ t.type = type; t.z = z; } };
+  // enemy line
+  for (let gx = 2; gx < 40; gx++) set(gx, enemyY(gx), 'etrench', -1);
+  // our line, with fire steps
+  for (let gx = 3; gx < 39; gx++){ set(gx, trenchY(gx), 'trench', -1); grid[trenchY(gx)][gx].step = true; }
+  // communication trench + supply bay
+  for (let gy = 14; gy <= 19; gy++) set(19, gy, 'trench', -1);
+  set(20, 18, 'trench', -1); set(20, 19, 'trench', -1);
+  // dugout A (signaller, bunks) and aid room, with connector traverses
+  const room = (x0, x1, kind) => { for (let gx = x0; gx <= x1; gx++){
+      for (let gy = trenchY(gx) + 1; gy <= 17; gy++) if (grid[gy][gx].type === 'ground') set(gx, gy, 'trench', -1);
+      for (let gy = 15; gy <= 17; gy++) set(gx, gy, kind, -1); } };
+  room(9, 12, 'dug'); room(26, 29, 'dug');
+  // craters in no man's land
+  for (let i = 0; i < 16; i++){ const gx = ri(3, 38), gy = ri(6, 11); set(gx, gy, 'crater', -0.35); }
+  // wire belts
+  const wire = [];
+  for (let gx = 4; gx < 38; gx += 2){ wire.push([gx, 11]); if (hash2(gx, 31) < 0.6) wire.push([gx + 1, 8]); }
+  // ladder edges: z-changes are only ever made here (or by raiders scrambling)
+  const ladders = new Set();
+  const lad = (a, b) => { ladders.add(a + '>' + b); ladders.add(b + '>' + a); };
+  lad('19,19', '19,20');            // comm trench up to the rear
+  lad('9,17', '9,20'); lad('29,17', '29,20');   // dugout shafts to their hatches
+  return { grid, wire, ladders,
+    hatchTiles: [[9, 20], [29, 20]],
+    sentryTiles: [5, 9, 13, 17, 21, 25, 29, 33, 36].map(gx => [gx, trenchY(gx)]),
+    bunkTiles: [[10, 17], [11, 17], [12, 17], [27, 17], [28, 17]],
+    graveTiles: [[5, 21], [6, 21], [7, 21], [5, 22], [6, 22], [7, 22], [4, 21], [4, 22], [8, 21], [8, 22], [5, 20], [6, 20]] };
+}
+function walkable(t, enemy){
+  if (!t) return false;
+  if (t.type === 'etrench') return !!enemy;
+  return ['ground','crater','trench','dug'].includes(t.type);
+}
+function findPath(sx, sy, tx, ty, opts){
+  opts = opts || {};
+  const key = (x, y) => x + ',' + y;
+  const start = tileAt(sx, sy), goal = tileAt(tx, ty);
+  if (!start || !goal) return null;
+  const q = [[sx, sy]], prev = new Map([[key(sx, sy), null]]);
+  while (q.length){ const [cx, cy] = q.shift();
+    if (cx === tx && cy === ty) break;
+    const ct = tileAt(cx, cy);
+    for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+      const nx = cx + dx, ny = cy + dy, nt = tileAt(nx, ny);
+      if (!nt || prev.has(key(nx, ny)) || !walkable(nt, opts.enemy)) continue;
+      const dz = Math.abs(nt.z - ct.z);
+      const ladderEdge = sim.map.ladders.has(key(cx, cy) + '>' + key(nx, ny));
+      if (dz > 0.6 && !ladderEdge && !opts.scramble) continue;
+      prev.set(key(nx, ny), [cx, cy]); q.push([nx, ny]); } }
+  if (!prev.has(key(tx, ty))) return null;
+  const path = []; let cur = [tx, ty];
+  while (cur){ path.unshift(cur); cur = prev.get(key(cur[0], cur[1])); }
+  return path;
+}
+
+/* ================= tile rendering ================= */
+function diamond(gx, gy, z, inset){
+  const i = inset || 0;
+  return [ [isoX(gx + i, gy + i), isoY(gx + i, gy + i, z)], [isoX(gx + 1 - i, gy + i), isoY(gx + 1 - i, gy + i, z)],
+           [isoX(gx + 1 - i, gy + 1 - i), isoY(gx + 1 - i, gy + 1 - i, z)], [isoX(gx + i, gy + 1 - i), isoY(gx + i, gy + 1 - i, z)] ];
+}
+function poly(pts, fill){ ctx.fillStyle = fill; ctx.beginPath();
+  pts.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.closePath(); ctx.fill(); }
+function drawTile(t){
+  const { gx, gy, z } = t;
+  // faces toward +gx and +gy where the neighbour is lower: pit walls and block sides
+  const nE = tileAt(gx + 1, gy), nS = tileAt(gx, gy + 1);
+  const c = { '00': [isoX(gx, gy), isoY(gx, gy, z)], '10': [isoX(gx + 1, gy), isoY(gx + 1, gy, z)],
+              '11': [isoX(gx + 1, gy + 1), isoY(gx + 1, gy + 1, z)], '01': [isoX(gx, gy + 1), isoY(gx, gy + 1, z)] };
+  const dugWall = t.type === 'trench' || t.type === 'dug' || (nE && (nE.type === 'trench' || nE.type === 'dug')) || (nS && (nS.type === 'trench' || nS.type === 'dug'));
+  const faceCol = PAL.soilDark;
+  if (nE && nE.z < z - 0.01){ const drop = (z - nE.z) * ZH;
+    poly([c['10'], c['11'], [c['11'][0], c['11'][1] + drop], [c['10'][0], c['10'][1] + drop]], faceCol);
+    if (dugWall){ ctx.strokeStyle = PAL.timberDark; ctx.lineWidth = 2.2;
+      [0.36, 0.7].forEach(k => { ctx.beginPath();
+        ctx.moveTo(c['10'][0], c['10'][1] + drop * k); ctx.lineTo(c['11'][0], c['11'][1] + drop * k); ctx.stroke(); }); } }
+  if (nS && nS.z < z - 0.01){ const drop = (z - nS.z) * ZH;
+    poly([c['01'], c['11'], [c['11'][0], c['11'][1] + drop], [c['01'][0], c['01'][1] + drop]], faceCol);
+    if (dugWall){ ctx.strokeStyle = PAL.timberDark; ctx.lineWidth = 2.2;
+      [0.36, 0.7].forEach(k => { ctx.beginPath();
+        ctx.moveTo(c['01'][0], c['01'][1] + drop * k); ctx.lineTo(c['11'][0], c['11'][1] + drop * k); ctx.stroke(); }); } }
+  // top: smooth value-noise ground, no blocks; per-tile jitter stays subtle
+  let top = PAL.grass;
+  const hv = hash2(gx * 3.1, gy * 5.7);
+  if (t.type === 'ground'){ const n = vnoise(gx * 0.3 + 9, gy * 0.3 + 3);
+    top = `hsl(${lerp(PAL.grassC[0], PAL.soilC[0], n)},${lerp(PAL.grassC[1], PAL.soilC[1], n)}%,${lerp(PAL.grassC[2], PAL.soilC[2], n)}%)`; }
+  else if (t.type === 'trench' || t.type === 'etrench') top = PAL.soilDark;
+  else if (t.type === 'dug') top = PAL.timber;
+  else if (t.type === 'crater') top = t.filled ? PAL.freshSoil : PAL.soilDeep;
+  else if (t.type === 'sapdig') top = PAL.soilDark;
+  poly([c['00'], c['10'], c['11'], c['01']], top);
+  if (t.type === 'ground'){ const j = (hv - 0.5) * 0.13;                                        // quiet per-tile jitter
+    ctx.fillStyle = j > 0 ? `rgba(255,246,225,${j})` : `rgba(0,0,0,${-j})`;
+    poly([c['00'], c['10'], c['11'], c['01']], ctx.fillStyle);
+    if (hv > 0.86){ ctx.fillStyle = PAL.timberDark;                                             // a lost plank
+      const px = isoX(gx + 0.5, gy + 0.5), py = isoY(gx + 0.5, gy + 0.5, z);
+      ctx.save(); ctx.translate(px, py); ctx.rotate(0.5 + hv); ctx.fillRect(-6, -1, 12, 2); ctx.restore(); }
+    // sandbags on the lip above a trench (ours face +gy, theirs face -gy); damage slumps them
+    const bagRow = (edge, dmg) => { ctx.fillStyle = PAL.cloth;
+      for (let i = 0; i < 4; i++){ const k = 0.14 + i * 0.24;
+        if (hash2(gx * 11 + i, gy * 5) < dmg * 0.35) continue;                    // this bag is gone
+        const slumped = hash2(gx * 7 + i, gy * 3) < dmg * 0.7;
+        const bx = lerp(edge[0][0], edge[1][0], k), by = lerp(edge[0][1], edge[1][1], k);
+        ctx.beginPath(); ctx.ellipse(bx, by - 1.6 - (i % 2) * 2.2 + (slumped ? 3 : 0), 6.4, slumped ? 1.9 : 2.7, 0, 0, 6.29); ctx.fill(); } };
+    const nDn = tileAt(gx, gy + 1), nUp = tileAt(gx, gy - 1);
+    if (nDn && nDn.type === 'trench') bagRow([c['01'], c['11']], Math.max(t.damage, t.chips / 14));
+    if (nUp && nUp.type === 'etrench') bagRow([c['00'], c['10']], nUp ? Math.max(nUp.damage, nUp.chips / 14) : 0); }
+  // detail, all seeded by position
+  ctx.fillStyle = 'rgba(0,0,0,.18)';
+  if (t.type === 'ground'){ for (let i=0;i<3;i++) if (hash2(gx * 7 + i, gy * 3) < 0.55)
+      ctx.fillRect(isoX(gx + hash2(gx, i), gy + hash2(gy, i + 9)) - 1, isoY(gx + hash2(gx, i), gy + hash2(gy, i + 9), z) - 0.5, 2.2, 1.1);
+    if (hv > 0.9){ ctx.strokeStyle = 'rgba(20,22,14,.38)'; ctx.lineWidth = 1;               // weed tuft, three blades
+      const wx = isoX(gx + 0.5, gy + 0.5), wy = isoY(gx + 0.5, gy + 0.5, z), sw = Math.sin(perfT + gx) * 0.9;
+      ctx.beginPath();
+      ctx.moveTo(wx - 2, wy); ctx.quadraticCurveTo(wx - 2.6 + sw * 0.4, wy - 3, wx - 3.4 + sw, wy - 5);
+      ctx.moveTo(wx, wy); ctx.quadraticCurveTo(wx + sw * 0.4, wy - 3.4, wx + sw, wy - 6);
+      ctx.moveTo(wx + 2, wy); ctx.quadraticCurveTo(wx + 2.6 + sw * 0.4, wy - 3, wx + 3.4 + sw, wy - 4.6); ctx.stroke(); }
+    const worn = tileAt(gx, gy - 1);                                                          // traffic-worn strip behind the line
+    if (worn && worn.type === 'trench'){ ctx.fillStyle = 'rgba(0,0,0,.1)';
+      poly([c['00'], c['10'], c['11'], c['01']], ctx.fillStyle); } }
+  if (t.type === 'trench' && hash2(gx, gy) < 0.72){                                          // duckboards
+    ctx.strokeStyle = 'rgba(96,70,40,.75)'; ctx.lineWidth = 2;
+    ctx.beginPath(); const a = [isoX(gx + 0.16, gy + 0.5), isoY(gx + 0.16, gy + 0.5, z)], b = [isoX(gx + 0.84, gy + 0.5), isoY(gx + 0.84, gy + 0.5, z)];
+    ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); }
+  if (t.step){ const stepZ = -0.45 - (t.damage > 0.4 ? 0.12 : 0);                              // a hit step sags
+    const stepCol = (t.patched > 0 && t.damage < 0.2) ? 'rgb(168,140,102)' : PAL.timber;        // a mended step is pale new wood
+    poly([ [isoX(gx, gy), isoY(gx, gy, stepZ)], [isoX(gx + 1, gy), isoY(gx + 1, gy, stepZ)],
+           [isoX(gx + 1, gy + 0.34), isoY(gx + 1, gy + 0.34, stepZ)], [isoX(gx, gy + 0.34), isoY(gx, gy + 0.34, stepZ)] ], stepCol);
+    poly([ [isoX(gx, gy + 0.34), isoY(gx, gy + 0.34, stepZ)], [isoX(gx + 1, gy + 0.34), isoY(gx + 1, gy + 0.34, stepZ)],
+           [isoX(gx + 1, gy + 0.34), isoY(gx + 1, gy + 0.34, -1)], [isoX(gx, gy + 0.34), isoY(gx, gy + 0.34, -1)] ], PAL.timberDark);
+    if (t.damage > 0.4){ ctx.strokeStyle = 'rgba(8,6,4,.7)'; ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.moveTo(isoX(gx + 0.3, gy + 0.05), isoY(gx + 0.3, gy + 0.05, stepZ));
+      ctx.lineTo(isoX(gx + 0.52, gy + 0.2), isoY(gx + 0.52, gy + 0.2, stepZ)); ctx.lineTo(isoX(gx + 0.78, gy + 0.1), isoY(gx + 0.78, gy + 0.1, stepZ)); ctx.stroke(); } }
+  if (t.type === 'sapdig'){ ctx.fillStyle = PAL.soil;                                          // spoil heap beside the digging
+    ctx.beginPath(); ctx.ellipse(isoX(gx + 0.72, gy + 0.72), isoY(gx + 0.72, gy + 0.72, z), 8.6, 3, 0, 0, 6.29); ctx.fill(); }
+  if (t.sap && t.fitted){ ctx.fillStyle = PAL.cloth;                                           // the sap head wears its own bags
+    for (let i = 0; i < 4; i++){ const k = 0.14 + i * 0.24;
+      const bx = lerp(c['00'][0], c['10'][0], k), by = lerp(c['00'][1], c['10'][1], k);
+      ctx.beginPath(); ctx.ellipse(bx, by - 1.4 - (i % 2) * 2, 5.8, 2.4, 0, 0, 6.29); ctx.fill(); } }
+  /* the land remembers: stains, worn paths, bullet chips, breakage, mending */
+  if (t.stain > 0.05){ ctx.fillStyle = `rgba(40,17,10,${t.stain * 0.4})`;
+    ctx.beginPath(); ctx.ellipse(isoX(gx + 0.5, gy + 0.5), isoY(gx + 0.5, gy + 0.5, z), 9.5, 3.4, 0, 0, 6.29); ctx.fill(); }
+  if (t.worn > 0.12){ ctx.fillStyle = `rgba(0,0,0,${t.worn * 0.1})`;
+    poly([c['00'], c['10'], c['11'], c['01']], ctx.fillStyle); }
+  if (t.chips > 0 && t.type === 'ground'){ ctx.fillStyle = 'rgba(12,10,8,.7)';
+    for (let i = 0; i < Math.min(8, t.chips); i++){ const k = hash2(gx * 13 + i * 7, gy * 3);
+      ctx.fillRect(lerp(c['00'][0], c['10'][0], k), lerp(c['00'][1], c['10'][1], k) + 5 + hash2(i, gx) * 7, 2.4, 1.2); } }
+  if (t.type === 'trench' || t.type === 'dug'){
+    if (t.patched > 0 && t.damage < 0.2){ ctx.strokeStyle = 'rgba(208,180,140,.75)'; ctx.lineWidth = 3;
+      [0.36, 0.62].forEach(f => { ctx.beginPath();
+        ctx.moveTo(isoX(gx + 0.14, gy + f), isoY(gx + 0.14, gy + f, z)); ctx.lineTo(isoX(gx + 0.86, gy + f), isoY(gx + 0.86, gy + f, z)); ctx.stroke(); }); }
+    if (t.damage > 0.2){ ctx.strokeStyle = 'rgba(8,6,4,.65)'; ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(isoX(gx + 0.2, gy + 0.3), isoY(gx + 0.2, gy + 0.3, z)); ctx.lineTo(isoX(gx + 0.55, gy + 0.55), isoY(gx + 0.55, gy + 0.55, z)); ctx.lineTo(isoX(gx + 0.44, gy + 0.8), isoY(gx + 0.44, gy + 0.8, z));
+      ctx.moveTo(isoX(gx + 0.7, gy + 0.24), isoY(gx + 0.7, gy + 0.24, z)); ctx.lineTo(isoX(gx + 0.5, gy + 0.6), isoY(gx + 0.5, gy + 0.6, z)); ctx.stroke(); }
+    if (t.rubble > 0.2){ ctx.fillStyle = PAL.soilDeep;
+      ctx.beginPath(); ctx.ellipse(isoX(gx + 0.5, gy + 0.55), isoY(gx + 0.5, gy + 0.55, z), 11, 3.8, 0, 0, 6.29); ctx.fill();
+      ctx.strokeStyle = PAL.timberDark; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(isoX(gx + 0.3, gy + 0.5), isoY(gx + 0.3, gy + 0.5, z) - 2); ctx.lineTo(isoX(gx + 0.66, gy + 0.4), isoY(gx + 0.66, gy + 0.4, z) - 4); ctx.stroke(); } }
+  if (sim.snow > 0.03 && z === 0){ ctx.fillStyle = `rgba(232,238,244,${sim.snow * 0.55})`;
+    poly([c['00'], c['10'], c['11'], c['01']], ctx.fillStyle); }
+  if ((t.type === 'trench' || t.type === 'dug') && sim.water > 1.2 && hash2(gx * 1.3, gy * 2.9) < sim.water / 9){
+    ctx.fillStyle = sim.frozen ? 'rgba(168,188,200,.36)' : 'rgba(46,58,64,.55)';
+    poly(diamond(gx, gy, -1 + Math.min(0.16, sim.water * 0.016), 0.15), ctx.fillStyle); }
+  if (t.type === 'crater' && sim.water > 4){ ctx.fillStyle = 'rgba(90,115,135,.45)';
+    ctx.beginPath(); ctx.ellipse(isoX(gx + 0.5, gy + 0.5), isoY(gx + 0.5, gy + 0.5, z), 15, 5.4, 0, 0, 6.29); ctx.fill(); }
+  if (sim.scorch && sim.scorch.has(gx + ',' + gy)){ ctx.fillStyle = `rgba(8,6,4,${sim.scorch.get(gx + ',' + gy) * 0.5})`;
+    poly([c['00'], c['10'], c['11'], c['01']], ctx.fillStyle); }
+  if (sim.map.bunkSet.has(gx + ',' + gy)){                                                                   // a bunk in the dugout
+    poly(diamond(gx, gy, -0.86, 0.16), PAL.timber);
+    ctx.fillStyle = PAL.cloth; const bx = isoX(gx + 0.24, gy + 0.3), by = isoY(gx + 0.24, gy + 0.3, -0.86);
+    ctx.fillRect(Math.round(bx), Math.round(by - 1), 22, 4); }
+}
+
+/* ================= soldiers ================= */
+let SID = 0;
+function makeSoldier(role, postTile){
+  return { id: SID++, role, fx: postTile[0] + 0.5, fy: postTile[1] + 0.5, z: -1, zOff: 0,
+    tx: postTile[0], ty: postTile[1], path: null, pathI: 0, destFx: postTile[0] + 0.5, destFy: postTile[1] + 0.5,
+    h: rr(0.94, 1.05), scarf: rng() < 0.32 ? pick(['accent','accent2']) : 'none',
+    state: 'idle', tState: rr(0, 3), stateAge: 0, speed: rr(0.8, 0.95), phase: rr(0, 6.28),
+    faceA: -Math.PI / 2, vx: 0, vy: 0, duck: 0, climbing: null, onStep: false,
+    brave: rng(), warm: rng(), friend: -1, grief: 0, jumpy: 0, clean: 0, letterT: rr(4, 44),
+    vig: null, duty: null, dead: false, arriveAct: null, shootAt: 0, fired: false, fumbled: false };
+}
+function setState(s, st, dur){ s.state = st; s.tState = dur; s.stateAge = 0; }
+function goTo(s, gx, gy, opts){
+  opts = opts || {};
+  const path = findPath(Math.floor(s.fx), Math.floor(s.fy), gx, gy, opts);
+  if (!path) return false;
+  s.path = path; s.pathI = 1;
+  s.destFx = (opts.fx !== undefined) ? gx + opts.fx : gx + 0.5;
+  s.destFy = (opts.fy !== undefined) ? gy + opts.fy : gy + 0.5;
+  s.arriveAct = opts.act || 'idle'; s.onStep = !!opts.step;
+  if (s.state !== 'grapple' && s.state !== 'down') setState(s, opts.state || 'walk', 60);
+  return true;
+}
+function soldierMove(s, dt){
+  if (s.climbing){ const c = s.climbing; c.t -= dt;
+    s.z = lerp(c.z1, c.z0, Math.max(0, c.t / c.dur));
+    s.phase += dt * 5;
+    if (c.t <= 0){ s.z = c.z1; s.climbing = null; }
+    return; }
+  if (!s.path || s.pathI >= s.path.length){
+    const tz = (tileAt(Math.floor(s.fx), Math.floor(s.fy)) || { z: 0 }).z + (s.onStep ? 0.55 : 0);
+    s.z += (tz - s.z) * Math.min(1, dt * 7); s.vx = 0; s.vy = 0; return; }
+  const node = s.path[s.pathI];
+  const isLast = s.pathI === s.path.length - 1;
+  const wx = isLast ? s.destFx : node[0] + 0.5, wy = isLast ? s.destFy : node[1] + 0.5;
+  const dx = wx - s.fx, dy = wy - s.fy, dist = Math.hypot(dx, dy);
+  let sp = (s.state === 'run' ? s.speed * 1.9 : s.state === 'carry' ? s.speed * 0.78 :
+              s.state === 'drag' ? 0.34 : s.enemy ? 0.52 : s.speed) * (s.enemy ? 1 : (sim.speedK || 1));
+  const tileHere = tileAt(Math.floor(s.fx), Math.floor(s.fy));
+  if (tileHere && tileHere.rubble > 0.3) sp *= 0.55;                       // rubble is slow going
+  const tKey = Math.floor(s.fx) + ',' + Math.floor(s.fy);                  // feet wear the ground dark
+  if (s.lastTile !== tKey){ s.lastTile = tKey; if (tileHere) tileHere.worn = Math.min(1, tileHere.worn + 0.045); }
+  if (dist < 0.05){ // arrived at node: check the edge we just crossed for a climb
+    const cur = tileAt(Math.floor(s.fx), Math.floor(s.fy)), nxt = tileAt(node[0], node[1]);
+    s.pathI++;
+    if (s.pathI >= s.path.length){ s.path = null; arrive(s); return; }
+    return; }
+  const mx = dx / dist, my = dy / dist;
+  s.vx = mx * sp; s.vy = my * sp;
+  s.fx += mx * Math.min(dist, sp * dt); s.fy += my * Math.min(dist, sp * dt);
+  s.faceA = Math.atan2(my, mx);
+  s.phase += sp * dt * 4.4;
+  // stepping into a tile of a different height: ladders and scrambles are events, not glides
+  const here = tileAt(Math.floor(s.fx), Math.floor(s.fy));
+  if (here && Math.abs(here.z - s.z) > 0.6 && !s.climbing)
+    s.climbing = { t: 1.05, dur: 1.05, z0: s.z, z1: here.z };
+  const tz = (here || { z: s.z }).z + (s.onStep && s.path === null ? 0.55 : 0);
+  if (!s.climbing) s.z += (tz - s.z) * Math.min(1, dt * 7);
+  // mud at the heel
+  if (sp > 0.4 && rng() < dt * 5) sim.parts.push({ kind:'dirt', fx: s.fx, fy: s.fy, z: s.z, ox: rr(-3, 3), oy: 0, h: 1.6, vx: rr(-7, 7), vy: rr(-2, 2), vh: rr(14, 30), life: rr(.25, .45), t: 0, col: PAL.soilDark, r: rr(0.8, 1.5) });
+}
+function arrive(s){
+  const act = s.arriveAct; s.arriveAct = null;
+  if (s.role === 'carrier'){ arriveCarrier(s); return; }
+  if (act === 'bow'){ s.vig = { pose: 'bow', t: rr(5, 8) }; setState(s, 'idle', 1); }
+  else if (act === 'post'){ setState(s, 'watch', rr(4, 8)); }
+  else if (act === 'despawn'){ s.gone = true; }
+  else if (act === 'bunk'){ setState(s, 'sleep', rr(20, 40)); }
+  else setState(s, 'idle', rr(0.5, 1.6));
+}
+
+/* ---- iso figure: built from shaded parts, pixel-snapped ---- */
+function facingOf(s){
+  const dx = Math.cos(s.faceA), dy = Math.sin(s.faceA);
+  const sx = dx - dy, sy = (dx + dy) * 0.5;
+  if (Math.abs(sx) > Math.abs(sy) * 1.7) return sx > 0 ? 'E' : 'W';
+  return sy > 0 ? 'S' : 'N';
+}
+function quad(x1, y1, x2, y2, w1, w2, col){
+  const dx = x2 - x1, dy = y2 - y1, L = Math.hypot(dx, dy) || 1, nx = -dy / L, ny = dx / L;
+  ctx.fillStyle = col; ctx.beginPath();
+  ctx.moveTo(Math.round(x1 + nx * w1), Math.round(y1 + ny * w1)); ctx.lineTo(Math.round(x2 + nx * w2), Math.round(y2 + ny * w2));
+  ctx.lineTo(Math.round(x2 - nx * w2), Math.round(y2 - ny * w2)); ctx.lineTo(Math.round(x1 - nx * w1), Math.round(y1 - ny * w1));
+  ctx.closePath(); ctx.fill();
+}
+function drawMan(s){
+  const sx = isoX(s.fx, s.fy), sy = isoY(s.fx, s.fy, s.z + (s.onStep && !s.path ? 0.55 : 0));
+  ctx.save(); ctx.translate(sx, sy); ctx.scale(1.16, 1.16); ctx.translate(-sx, -sy);
+  const F = facingOf(s), mir = F === 'W' ? -1 : 1;
+  const uni = s.enemy ? PAL.soilDeep : PAL.uniform, uniD = PAL.uniformDark;
+  ctx.fillStyle = 'rgba(0,0,0,.3)';
+  ctx.beginPath(); ctx.ellipse(sx, sy + 1, 11, 3.4, 0, 0, 6.29); ctx.fill();
+  if (s.state === 'down' || s.state === 'sleep'){
+    const breathe = s.dead ? 0 : Math.sin(perfT * 1.1 + s.id) * 0.4;
+    quad(sx - 12, sy - 3, sx + 8, sy - 4 + breathe * 0.3, 3.4, 4.2, uni);
+    quad(sx - 12, sy - 1.6, sx - 20, sy - 0.6, 2.4, 1.8, uniD);
+    ctx.fillStyle = PAL.skin; ctx.beginPath(); ctx.arc(sx + 12.4, sy - 4.4 + breathe * 0.3, 4.4, 0, 6.29); ctx.fill();
+    ctx.fillStyle = uniD; ctx.beginPath(); ctx.ellipse(sx + 12.4, sy - 6.6 + breathe * 0.3, 6, 2.7, 0, Math.PI, 0); ctx.fill();
+    if (s.state === 'sleep'){ ctx.fillStyle = PAL.cloth; ctx.fillRect(sx - 14, sy - 6.4, 26, 3.4); }
+    ctx.restore(); return; }
+  const moving = !!s.path || s.climbing;
+  const crouchK = s.duck > 0 ? 4.6 : s.crouch ? 4 : s.climbing ? 2 : 0;
+  const hipY = sy - 15 + crouchK + (s.state === 'sit' || (s.vig && (s.vig.pose === 'cards' || s.vig.pose === 'read')) ? 8.5 : 0);
+  const shY = hipY - 14.5, headY = shY - 5.2;
+  const lean = (s.state === 'carry' ? 2.6 : s.state === 'drag' ? -3 : s.state === 'grapple' ? 2 + Math.sin(perfT * 2.2 + s.id * 2.4) * 1.2 : moving ? 1.2 : 0.4);
+  const hipX = sx, shX = sx + (F === 'S' || F === 'N' ? 0 : mir * lean * 0.4) + (F === 'S' ? lean * 0.3 : 0);
+  /* legs */
+  const stride = moving ? Math.sin(s.phase) * 4.4 : 0, lift = moving ? Math.abs(Math.cos(s.phase)) * 2 : 0;
+  const dirx = F === 'E' ? 1 : F === 'W' ? -1 : 0.35 * mir;
+  [[-3.1, 0], [3.1, Math.PI]].forEach(([off, ph]) => {
+    const fx2 = hipX + off + (moving ? Math.sin(s.phase + ph) * 4.4 * (dirx || 0.4) : off * 0.3);
+    const fy2 = sy - (moving ? Math.max(0, Math.cos(s.phase + ph)) * 2.2 : 0);
+    quad(hipX + off * 0.7, hipY, (hipX + fx2) / 2 + 1, (hipY + fy2) / 2, 2.6, 2.1, uniD);
+    quad((hipX + fx2) / 2 + 1, (hipY + fy2) / 2, fx2, fy2, 2, 1.5, uniD);
+    ctx.fillStyle = '#17130e'; ctx.fillRect(Math.round(fx2 - 3), Math.round(fy2 - 1.4), 6.6, 2); });
+  /* pack (behind, when back or side to us) */
+  if (F !== 'S' && s.role !== 'cook' && !s.enemy){ ctx.fillStyle = PAL.timberDark;
+    ctx.fillRect(Math.round(shX - 4.6), Math.round(shY + 1), 9, 10); }
+  /* torso */
+  ctx.fillStyle = uni; ctx.beginPath();
+  ctx.moveTo(hipX - 5.6, hipY + 1); ctx.lineTo(hipX + 5.6, hipY + 1);
+  ctx.lineTo(shX + 5, shY); ctx.lineTo(shX - 5, shY); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = 'rgba(0,0,0,.22)'; ctx.fillRect(Math.round(shX + 1.4), Math.round(shY), 3.6, Math.round(hipY - shY));   // side shade
+  ctx.fillStyle = uniD; ctx.fillRect(Math.round(hipX - 5.6), Math.round(hipY - 1.6), 11.2, 2);                            // belt
+  if (F === 'S'){ ctx.fillStyle = PAL.timberDark; ctx.fillRect(Math.round(shX - 4.4), Math.round(hipY - 4.4), 3.4, 3); ctx.fillRect(Math.round(shX + 1.2), Math.round(hipY - 4.4), 3.4, 3); }  // pouches
+  /* arms + rifle by pose */
+  const pose = s.vig ? s.vig.pose : s.state;
+  const hand = (side, hx, hy) => { const shx = shX + side * 5.2, shy = shY + 2;
+    quad(shx, shy, (shx + hx) / 2 + side * 1, (shy + hy) / 2, 2.3, 1.9, uni);
+    quad((shx + hx) / 2 + side * 1, (shy + hy) / 2, hx, hy, 1.8, 1.4, uni);
+    ctx.fillStyle = PAL.skinDark; ctx.beginPath(); ctx.arc(hx, hy, 1.9, 0, 6.29); ctx.fill(); return [hx, hy]; };
+  let hL, hR;
+  if (pose === 'watch' || pose === 'shoot'){
+    const aimY = shY - 3, aimX = shX + (F === 'N' ? 3 : F === 'S' ? -3 : mir * 9);
+    hR = hand(1, aimX, aimY); hL = hand(-1, aimX - mir * 3, aimY + 3);
+    const rl = sim.culture.rifleLen;
+    ctx.strokeStyle = PAL.timberDark; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(shX - mir * 5, shY + 3); ctx.lineTo(aimX, aimY); ctx.stroke();
+    ctx.strokeStyle = '#232019'; ctx.lineWidth = 1.7;
+    const mx = aimX + (F === 'N' ? 2.4 : F === 'S' ? -2.4 : mir * rl * 0.62), my = aimY + (F === 'N' ? -rl * 0.42 : F === 'S' ? rl * 0.3 : -rl * 0.16);
+    ctx.beginPath(); ctx.moveTo(aimX, aimY); ctx.lineTo(mx, my); ctx.stroke();
+    s.muzzlePos = [mx, my];
+  } else if (pose === 'carry'){
+    hL = hand(-1, sx - 4 + mir * 3, hipY - 3); hR = hand(1, sx + 5 + mir * 3, hipY - 3);
+    ctx.fillStyle = PAL.timber; ctx.fillRect(Math.round(sx + mir * 2 - 3), Math.round(hipY - 10), 15, 11);
+    ctx.strokeStyle = PAL.timberDark; ctx.lineWidth = 1.1; ctx.strokeRect(Math.round(sx + mir * 2 - 3), Math.round(hipY - 10), 15, 11);
+  } else if (pose === 'cook'){ const t = perfT * 2.3 + s.id;
+    hL = hand(-1, sx - 5, hipY - 2); hR = hand(1, sx + Math.cos(t) * 3.4, hipY - 5 + Math.sin(t) * 1.8);
+  } else if (pose === 'crank'){ const t = perfT * 4.6 + s.id;
+    hL = hand(-1, sx - 5, hipY - 3); hR = hand(1, sx + 4 + Math.cos(t) * 1.8, hipY - 6 + Math.sin(t) * 2.4);
+  } else if (s.climbing){ const t = s.phase;
+    hL = hand(-1, sx - 5, shY - 6 + Math.sin(t) * 2.6); hR = hand(1, sx + 5, shY - 6 + Math.sin(t + Math.PI) * 2.6);
+  } else if (pose === 'grapple'){ const sw = Math.sin(perfT * 1.9 + s.id * 2.4);
+    const fx2 = sx + Math.cos(s.faceA) * 8 - Math.sin(s.faceA) * 0, fy2 = shY - 1 + sw * 2;
+    hL = hand(-1, fx2 - 2, fy2 + 2); hR = hand(1, fx2 + 2, fy2 - 1 + sw * 2.4);
+  } else if (pose === 'drag'){ hL = hand(-1, sx - 7, hipY + 1); hR = hand(1, sx + 7, hipY + 1);
+  } else if (pose === 'read' || pose === 'cards'){
+    hL = hand(-1, sx - 3, hipY - 5); hR = hand(1, sx + 3.4, hipY - 5);
+    ctx.fillStyle = '#ddd6c4'; ctx.fillRect(Math.round(sx - 4), Math.round(hipY - 10.4), 8.6, 6);
+  } else if (pose === 'bow' || pose === 'grieve'){ hL = hand(-1, sx - 4, hipY + 2); hR = hand(1, sx + 4, hipY + 2);
+  } else if (pose === 'repair'){ const t = Math.sin(perfT * 2.6 + s.id) * 2.4;
+    hL = hand(-1, sx - 5, hipY - 2 + t * 0.4); hR = hand(1, sx + 6, hipY - 4 + t);
+  } else { const sw = moving ? Math.sin(s.phase) * 2.4 : Math.sin(perfT * 1.3 + s.id) * 0.5;
+    hL = hand(-1, sx - 6.4, hipY + 1 + sw); hR = hand(1, sx + 6.4, hipY + 1 - sw);
+    if (!s.enemy && s.role !== 'cook'){ ctx.strokeStyle = '#232019'; ctx.lineWidth = 2.4;                  // slung rifle
+      ctx.beginPath(); ctx.moveTo(shX - 4, shY + 8); ctx.lineTo(shX + 3.4, shY - 5); ctx.stroke(); } }
+  /* head + helmet */
+  const headDown = (pose === 'bow' || pose === 'grieve') ? 2.6 : pose === 'read' || pose === 'cards' ? 1.8 : (s.duck > 0 ? 1.6 : 0);
+  const hx = shX + (F === 'S' ? 0.6 : F === 'N' ? -0.6 : mir * 1.2), hy = headY + headDown;
+  ctx.fillStyle = PAL.skin; ctx.beginPath(); ctx.arc(hx, hy, 4.9, 0, 6.29); ctx.fill();
+  if (F === 'S'){ ctx.fillStyle = 'rgba(0,0,0,.16)'; ctx.fillRect(Math.round(hx - 3.4), Math.round(hy + 0.6), 6.8, 3.4); }
+  const helm = s.enemy ? sim.culture.enemyHelm : sim.culture.helm;
+  ctx.fillStyle = uniD;
+  if (helm === 'brim'){ ctx.beginPath(); ctx.ellipse(hx, hy - 2, 10.8, 2.9, 0, Math.PI, 0); ctx.fill(); ctx.fillRect(Math.round(hx - 10.8), Math.round(hy - 2.3), 21.6, 1.7); }
+  else if (helm === 'cap'){ ctx.fillRect(Math.round(hx - 4.6), Math.round(hy - 6.6), 9.2, 4.4); ctx.fillRect(Math.round(hx + (mir > 0 ? 1.6 : -7.6)), Math.round(hy - 2.6), 6, 1.6); }
+  else { ctx.beginPath(); ctx.ellipse(hx, hy - 2.3, 7.8, 3.3, 0, Math.PI, 0); ctx.fill(); ctx.fillRect(Math.round(hx - 7.8), Math.round(hy - 2.6), 15.6, 1.8); }
+  /* scarf */
+  if (s.scarf !== 'none'){ ctx.fillStyle = s.scarf === 'accent' ? PAL.accent : PAL.accent2;
+    ctx.fillRect(Math.round(hx - 3.4), Math.round(hy + 2.6), 6.8, 2.6);
+    const tx2 = hx - (F === 'E' ? 6 : F === 'W' ? -6 : 2.4), sway = Math.sin(perfT * 2.2 + s.id * 3) * 1.3;
+    quad(hx - 1, hy + 4.4, tx2 + sway * 0.4, hy + 9, 2, 1.6, ctx.fillStyle); }
+  if (s.clean > 0.1){ ctx.fillStyle = `rgba(226,222,205,${s.clean * 0.12})`;
+    ctx.beginPath(); ctx.ellipse(sx, hipY - 6, 6, 11.6, 0, 0, 6.29); ctx.fill(); }
+  ctx.restore();
+}
+
+/* ================= props ================= */
+function buildProps(){
+  const P = [], potGy = trenchY(18);
+  P.push({ kind:'pot', fx: 18.5, fy: potGy + 0.5, z: -1 });
+  P.push({ kind:'phone', fx: 10.5, fy: 16.5, z: -1 });
+  P.push({ kind:'crossAid', fx: 27.5, fy: trenchY(27) + 0.85, z: -1 });
+  P.push({ kind:'crates', fx: 20.5, fy: 18.5, z: -1 });
+  P.push({ kind:'banner', fx: 6.5, fy: 15.6, z: 0 });
+  P.push({ kind:'ladder', fx: 19.5, fy: 19.98, z: 0 });
+  sim.map.hatchTiles.forEach(([gx, gy]) => P.push({ kind:'hatch', fx: gx + 0.5, fy: gy + 0.5, z: 0 }));
+  sim.map.wire.forEach(([gx, gy]) => { if (hash2(gx, gy) < 0.75) P.push({ kind:'wire', fx: gx + 0.5, fy: gy + 0.5, z: 0 }); });
+  [[7, 8], [22, 6], [33, 17]].forEach(([gx, gy]) => P.push({ kind:'mast', fx: gx + 0.5, fy: gy + 0.5, z: 0 }));
+  P.push({ kind:'barrel', fx: 21.6, fy: 20.6, z: 0 }); P.push({ kind:'barrel', fx: 22.4, fy: 20.1, z: 0 });
+  P.push({ kind:'planks', fx: 16.5, fy: 21.5, z: 0 });
+  return P;
+}
+function drawProp(p){
+  const sx = isoX(p.fx, p.fy), sy = isoY(p.fx, p.fy, p.z);
+  if (p.kind === 'pot'){ ctx.fillStyle = '#191512';
+    ctx.beginPath(); ctx.ellipse(sx, sy - 3.4, 7.6, 5.2, 0, 0, 6.29); ctx.fill();
+    ctx.fillStyle = '#2a251f'; ctx.beginPath(); ctx.ellipse(sx, sy - 8.2, 7.2, 2.5, 0, 0, 6.29); ctx.fill();
+    ctx.strokeStyle = '#241d16'; ctx.lineWidth = 2.4;
+    ctx.beginPath(); ctx.moveTo(sx - 9, sy + 2); ctx.lineTo(sx - 6, sy - 3); ctx.moveTo(sx + 9, sy + 2); ctx.lineTo(sx + 6, sy - 3); ctx.stroke();
+    if (sim.crates > 0 && rng() < 0.12) sim.parts.push({ kind:'steam', fx: p.fx, fy: p.fy, z: -0.4, ox: 0, h: 9, vh: rr(9, 15), life: rr(.8, 1.5), t: 0, col:'200,200,196', r: rr(1.6, 2.8) }); }
+  else if (p.kind === 'phone'){ ctx.fillStyle = PAL.timberDark; ctx.fillRect(Math.round(sx - 5), Math.round(sy - 9), 10, 9);
+    ctx.fillStyle = PAL.accent2; ctx.fillRect(Math.round(sx - 1.6), Math.round(sy - 12.4), 3.2, 3.4);
+    ctx.strokeStyle = '#0e0c09'; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(sx + 5, sy - 5); ctx.lineTo(sx + 9, sy - 8 + Math.sin(perfT * 2) * 0.7); ctx.stroke(); }
+  else if (p.kind === 'crossAid'){ ctx.fillStyle = PAL.timberDark; ctx.fillRect(Math.round(sx - 1), Math.round(sy - 26), 2, 26);
+    ctx.fillStyle = '#ddd6c4'; ctx.fillRect(Math.round(sx - 6), Math.round(sy - 32), 12, 11);
+    ctx.fillStyle = 'hsl(4,72%,46%)'; ctx.fillRect(Math.round(sx - 1.4), Math.round(sy - 30.4), 2.8, 7.8); ctx.fillRect(Math.round(sx - 3.8), Math.round(sy - 28), 7.6, 2.8); }
+  else if (p.kind === 'crates'){ const n = Math.min(6, Math.ceil(sim.crates));
+    for (let i = 0; i < n; i++){ const cxp = sx + (i % 3 - 1) * 12.5, cyp = sy - Math.floor(i / 3) * 10.6;
+      ctx.fillStyle = PAL.timber; ctx.fillRect(Math.round(cxp - 6.4), Math.round(cyp - 10), 12.8, 10);
+      ctx.strokeStyle = PAL.timberDark; ctx.lineWidth = 1.1; ctx.strokeRect(Math.round(cxp - 6.4), Math.round(cyp - 10), 12.8, 10);
+      ctx.beginPath(); ctx.moveTo(cxp - 6.4, cyp - 10); ctx.lineTo(cxp + 6.4, cyp); ctx.stroke(); } }
+  else if (p.kind === 'banner'){ ctx.fillStyle = PAL.timberDark; ctx.fillRect(Math.round(sx - 1), Math.round(sy - 34), 2, 34);
+    const sway = Math.sin(perfT * 1.6) * 1.6;
+    ctx.fillStyle = PAL.uniformDark; ctx.beginPath();
+    ctx.moveTo(sx, sy - 33); ctx.lineTo(sx + 13 + sway, sy - 31 + sway * 0.3); ctx.lineTo(sx + 12 + sway, sy - 21 + sway * 0.3); ctx.lineTo(sx, sy - 23); ctx.closePath(); ctx.fill(); }
+  else if (p.kind === 'ladder'){ const top = isoY(p.fx, p.fy, 0), bot = isoY(p.fx, p.fy, -1);
+    ctx.strokeStyle = PAL.timber; ctx.lineWidth = 1.8;
+    ctx.beginPath(); ctx.moveTo(sx - 5, top); ctx.lineTo(sx - 5, bot); ctx.moveTo(sx + 5, top); ctx.lineTo(sx + 5, bot); ctx.stroke();
+    ctx.lineWidth = 1.3; ctx.beginPath();
+    for (let i = 1; i <= 3; i++){ const y = lerp(bot, top, i / 4); ctx.moveTo(sx - 5, y); ctx.lineTo(sx + 5, y); } ctx.stroke(); }
+  else if (p.kind === 'hatch'){ ctx.strokeStyle = PAL.timberDark; ctx.lineWidth = 2;
+    ctx.strokeRect(Math.round(sx - 11), Math.round(sy - 5.4), 22, 10.6);
+    ctx.fillStyle = PAL.timber; ctx.beginPath();
+    ctx.moveTo(sx - 11, sy - 5.4); ctx.lineTo(sx + 2, sy - 14); ctx.lineTo(sx + 7, sy - 11.4); ctx.lineTo(sx + 2, sy - 3.4); ctx.closePath(); ctx.fill(); }
+  else if (p.kind === 'wire'){ ctx.strokeStyle = 'rgba(16,14,12,.9)'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(sx - 2, sy); ctx.lineTo(sx + 3, sy - 13); ctx.moveTo(sx + 7, sy); ctx.lineTo(sx - 4, sy - 11); ctx.stroke();
+    ctx.lineWidth = 0.9; for (let i = 0; i < 3; i++){ ctx.beginPath();
+      ctx.arc(sx + Math.sin(i * 7 + p.fx) * 4, sy - 8 + i * 2.6, 3.4 + i, 0.4, 5.1); ctx.stroke(); } }
+  else if (p.kind === 'mast'){ ctx.fillStyle = PAL.soilDeep;
+    ctx.beginPath(); ctx.moveTo(sx - 3.4, sy); ctx.lineTo(sx - 1.4, sy - 46); ctx.lineTo(sx + 0.6, sy - 40); ctx.lineTo(sx + 2.4, sy - 49); ctx.lineTo(sx + 3.6, sy); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = PAL.soilDeep; ctx.lineWidth = 2.6;
+    ctx.beginPath(); ctx.moveTo(sx + 1, sy - 34); ctx.lineTo(sx + 13, sy - 41); ctx.stroke(); }
+  else if (p.kind === 'barrel'){ ctx.fillStyle = PAL.timberDark;
+    ctx.fillRect(Math.round(sx - 5), Math.round(sy - 13), 10, 13);
+    ctx.fillStyle = PAL.timber; ctx.beginPath(); ctx.ellipse(sx, sy - 13, 5, 2, 0, 0, 6.29); ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.fillRect(Math.round(sx - 5), Math.round(sy - 9), 10, 1.6); ctx.fillRect(Math.round(sx - 5), Math.round(sy - 4), 10, 1.6); }
+  else if (p.kind === 'planks'){ ctx.fillStyle = PAL.timberDark;
+    for (let i = 0; i < 3; i++) ctx.fillRect(Math.round(sx - 11), Math.round(sy - 2 - i * 2.4), 22, 1.9); }
+  else if (p.kind === 'grave'){ ctx.fillStyle = 'rgba(0,0,0,.25)';
+    ctx.beginPath(); ctx.ellipse(sx, sy + 3.6, 10.4, 3, 0, 0, 6.29); ctx.fill();
+    if (sim.culture.grave === 'cross'){ ctx.fillStyle = PAL.timber;
+      ctx.fillRect(Math.round(sx - 1), Math.round(sy - 13), 2.2, 13); ctx.fillRect(Math.round(sx - 4.4), Math.round(sy - 9.6), 9.6, 2); }
+    else if (sim.culture.grave === 'stone'){ ctx.fillStyle = PAL.soil;
+      ctx.beginPath(); ctx.ellipse(sx, sy - 4.4, 5, 6.4, 0, Math.PI, 0); ctx.fill(); ctx.fillRect(Math.round(sx - 5), Math.round(sy - 4.6), 10, 4.6); }
+    else { ctx.fillStyle = PAL.timberDark; ctx.fillRect(Math.round(sx - 1), Math.round(sy - 12), 2, 12);
+      ctx.fillStyle = PAL.uniformDark; ctx.beginPath(); ctx.ellipse(sx, sy - 13.6, 7.4, 3, 0, Math.PI, 0); ctx.fill(); } }
+}
+
+/* ================= behaviours ================= */
+const lineTiles = () => { const L = []; for (let gx = 4; gx < 38; gx++) L.push([gx, trenchY(gx)]); return L; };
+const dugTiles = (x0, x1) => { const L = []; for (let gx = x0; gx <= x1; gx++) for (let gy = 15; gy <= 17; gy++) L.push([gx, gy]); return L; };
+function think(s){
+  const night = sim.hour < 5.6 || sim.hour > 19.4;
+  const eat = () => { if (sim.crates > 0.15){ sim.crates -= 0.12; goTo(s, 18, trenchY(18), { act:'idle' }); s.vig = { pose:'cards', t: rr(5, 9) }; return true; } return false; };
+  if (s.role === 'sign'){
+    if (sim.commHit > 0){ const ph = sim.map; goTo(s, 10, 16, { act:'idle' }); s.vig = { pose:'crank', t: 6 }; sim.commHit = 0; return; }
+    if (rng() < 0.4){ goTo(s, 10, 16, {}); s.vig = { pose:'crank', t: rr(3, 5) }; }
+    else if (night && rng() < 0.5){ const b = pick(sim.map.bunkTiles); goTo(s, b[0], b[1], { act:'bunk' }); }
+    else { const t = pick(dugTiles(9, 12)); goTo(s, t[0], t[1], {}); s.vig = { pose: rng() < 0.5 ? 'read' : 'cards', t: rr(4, 8) }; }
+    return; }
+  if (s.role === 'cook'){
+    if (rng() < 0.62){ goTo(s, 18, trenchY(18), { fx: 0.5 + rr(-0.2, 0.2), fy: 0.5 }); s.vig = { pose:'cook', t: rr(5, 9) }; }
+    else if (rng() < 0.4){ goTo(s, 20, 18, {}); setState(s, 'idle', rr(2, 4)); }
+    else if (!eat()) { const t = pick(lineTiles()); goTo(s, t[0], t[1], {}); }
+    return; }
+  if (s.role === 'medic'){
+    if (sim.woundedRef){ const w = sim.woundedRef; goTo(s, Math.floor(w.fx), Math.floor(w.fy), { act:'fetch' }); s.duty = 'fetch'; return; }
+    if (rng() < 0.5){ const t = pick(dugTiles(26, 29)); goTo(s, t[0], t[1], {}); s.vig = { pose:'read', t: rr(4, 7) }; }
+    else { const t = pick(lineTiles()); goTo(s, t[0], t[1], {}); }
+    return; }
+  if (s.role === 'runner'){
+    const dests = [[10, 16], [27, 16], [19, 18]]; const d = pick(dests);
+    goTo(s, d[0], d[1], {}); setState(s, 'walk', 40); return; }
+  // riflemen, sentries, veteran: the works come first when there is damage to mend
+  if ((s.role === 'rifle' || s.role === 'vet') && sim.jobs && sim.jobs.length && rng() < 0.82){
+    const j = sim.jobs.shift(); s.job = j;
+    goTo(s, (j.stand || [j.gx, j.gy])[0], (j.stand || [j.gx, j.gy])[1], {}); return; }
+  if (s.grief > 0){ s.grief = 0; const g = sim.map.graveTiles[sim.graves % sim.map.graveTiles.length];
+    goTo(s, g[0], g[1], { act:'bow' }); return; }
+  if (s.role === 'sent' && sim.sapPost && rng() < 0.22){ goTo(s, sim.sapPost[0], sim.sapPost[1], { act:'post', fy: 0.3 }); return; }
+  if (s.role === 'sent' && (night || rng() < 0.66)){ const post = sim.map.sentryTiles[s.postI % sim.map.sentryTiles.length];
+    goTo(s, post[0], post[1], { act:'post', step: true, fx: 0.5, fy: 0.24 }); return; }
+  const r = rng();
+  if (night && r < 0.3){ const b = pick(sim.map.bunkTiles); goTo(s, b[0], b[1], { act:'bunk' }); }
+  else if (r < 0.52){ const t = pick(lineTiles()); goTo(s, t[0], t[1], { act:'post', step: rng() < 0.5, fy: 0.3 }); }
+  else if (r < 0.66){ const t = pick(rng() < 0.5 ? dugTiles(9, 12) : dugTiles(26, 29)); goTo(s, t[0], t[1], {}); if (rng() < 0.6) s.vig = { pose: rng() < 0.5 ? 'cards' : 'read', t: rr(5, 9) }; }
+  else if (r < 0.78){ eat(); }
+  else if (r < 0.88){ const t = pick(lineTiles()); goTo(s, t[0], t[1], {}); s.vig = { pose:'repair', t: rr(4, 7) }; }
+  else { const t = pick(dugTiles(9, 12)); goTo(s, t[0], t[1], {}); s.vig = { pose:'read', t: rr(5, 8) }; }
+}
+function directorTick(dt){
+  sim.directorT -= dt; if (sim.directorT > 0) return;
+  sim.directorT = rr(15, 28);
+  const free = sim.soldiers.filter(s => !s.dead && !s.enemy && !s.path && !s.vig && s.state !== 'sleep' && s.state !== 'watch');
+  if (!free.length) return;
+  free.sort((a, b) => b.letterT - a.letterT);
+  const a = free[0]; a.letterT = 0;
+  a.vig = { pose:'read', t: rr(7, 11) };
+  const near = free.find(s => s !== a && Math.abs(s.fx - a.fx) + Math.abs(s.fy - a.fy) < 5.5);
+  if (near){ near.vig = { pose:'cards', t: rr(7, 11) }; near.faceA = Math.atan2(a.fy - near.fy, a.fx - near.fx); }
+}
+function arriveCarrier(s){
+  if (s.leg === 'in'){ s.leg = 'out';
+    if (s.rookie){ s.rookie = false; s.role = 'rifle'; s.postI = ri(0, 8);
+      const g = sim.soldiers.find(x => x.id === sim.rookieGreeter);
+      if (g && !g.dead){ g.faceA = Math.atan2(s.fy - g.fy, s.fx - g.fx); setState(g, 'idle', 3); }
+      setState(s, 'idle', 1); return; }
+    sim.crates = Math.min(6, sim.crates + 1.4);
+    goTo(s, 1, 23, { act:'despawn' }); setState(s, 'carry', 90);
+  } else s.gone = true;
+}
+
+/* ================= violence and weather from the sky ================= */
+function spawnShell(tx, ty, fromRear){
+  const tz = (tileAt(Math.round(tx), Math.round(ty)) || { z: 0 }).z;
+  sim.parts.push({ kind:'shell', fx: tx + rr(-3, -1), fy: ty + rr(2.5, 4), tx, ty, z: tz, p: 0, t: 0, dur: rr(0.75, 1.05) });
+  if (fromRear){ sim.parts.push({ kind:'shell', fx: tx + rr(6, 9), fy: ty + rr(8, 11), tx, ty, z: tz, p: 0, t: 0, dur: rr(0.9, 1.15) }); }
+}
+function burst(bx, by){
+  const cx = Math.floor(bx), cy = Math.floor(by);
+  const t = tileAt(cx, cy); if (!t) return;
+  sim.scorch.set(cx + ',' + cy, 1);                       // scorch never fully fades
+  for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++){
+    const tt = tileAt(cx + dx, cy + dy); if (!tt) continue;
+    const centre = dx === 0 && dy === 0;
+    if (tt.type === 'trench' || tt.type === 'dug'){ tt.damage = Math.min(1, tt.damage + (centre ? 0.55 : 0.22)); if (centre) tt.rubble = Math.min(1, tt.rubble + 0.5); }
+    else if (tt.type === 'ground'){ tt.damage = Math.min(1, tt.damage + (centre ? 0.4 : 0.22));
+      if (centre && rng() < 0.55 && !sim.map.noCrater.has(tt.gx + ',' + tt.gy)){ tt.type = 'crater'; tt.z = -0.35; tt.filled = false; } } }
+  sim.lights.push({ fx: bx, fy: by, z: t.z, r: 120, t: 0, ttl: 0.28 });
+  sim.shake = Math.min(7, sim.shake + 3.4);
+  for (let i = 0; i < 20; i++) sim.parts.push({ kind:'dirt', fx: bx, fy: by, z: t.z, ox: rr(-4, 4), oy: rr(-2, 2), h: rr(0, 6),
+    vx: rr(-16, 16), vy: rr(-8, 4), vh: rr(60, 190), life: rr(.4, 1), t: 0, col: PAL.soilDark, r: rr(1.2, 2.8) });
+  sim.parts.push({ kind:'ring', fx: bx, fy: by, z: t.z, t: 0, life: 0.5 });
+  sim.soldiers.forEach(s => { if (s.dead) return;
+    const d = Math.hypot(s.fx - bx, s.fy - by);
+    if (d < 1 && s.state !== 'down') wound(s, 'shell');
+    else if (d < 2.6) s.duck = Math.max(s.duck, rr(0.7, 1.4)); });
+}
+function dropJob(s){ if (s.job){ s.job = null; } }
+function wound(s, cause){
+  if (s.state === 'down' || s.dead) return;
+  dropJob(s);
+  const tt = tileAt(Math.floor(s.fx), Math.floor(s.fy)); if (tt) tt.stain = Math.min(1, tt.stain + 0.65);
+  const roll = rng();
+  if (roll < 0.42){ killSoldier(s, cause); return; }
+  s.state = 'down'; setState(s, 'down', 9999); s.path = null; sim.woundedRef = s;
+}
+function killSoldier(s, cause){
+  dropJob(s);
+  const tt = tileAt(Math.floor(s.fx), Math.floor(s.fy)); if (tt) tt.stain = Math.min(1, tt.stain + 0.8);
+  s.dead = true; s.state = 'down'; s.path = null; s.vig = null; s.foe = null;
+  sim.corpses.push(s);
+  sim.soldiers.forEach(o => { if (o.friend === s.id && !o.dead) o.grief = 1; });
+}
+function fireTracer(a, b){
+  sim.parts.push({ kind:'tracer', fx0: a.fx, fy0: a.fy, z0: a.z + 1.3, fx1: b.fx ?? b[0], fy1: b.fy ?? b[1], z1: (b.z ?? 0) + 1, t: 0, life: 0.09 });
+  sim.lights.push({ fx: a.fx, fy: a.fy, z: a.z + 1.2, r: 54, t: 0, ttl: 0.09 });
+  const tt = tileAt(Math.floor(b.fx ?? 0), Math.floor(b.fy ?? 0));                    // every shot chips something
+  if (tt && rng() < 0.7) tt.chips = Math.min(9, tt.chips + 1);
+}
+function updateEvents(dt){
+  sim.nextShell -= dt;
+  if (sim.nextShell <= 0){ sim.nextShell = sim.raid.active ? rr(4, 9) : rr(7, 18);
+    if ((sim.project || sim.sapPost) && rng() < 0.24){ const tgt = sim.project ? sim.project.tiles[sim.project.idx] : sim.sapPost;
+      spawnShell(tgt[0] + rr(-0.5, 0.5), tgt[1] + rr(-0.5, 0.5)); }        // the war notices new digging
+    else { const zone = pick(['line', 'field', 'field', 'enemy', 'rear']);
+    if (zone === 'line'){ const gx = ri(4, 38); spawnShell(gx + rr(-0.4, 0.4), trenchY(gx) + rr(-0.4, 0.4)); }
+    else if (zone === 'enemy'){ const gx = ri(4, 38); spawnShell(gx, enemyY(gx), true); }
+    else if (zone === 'rear') spawnShell(ri(14, 26), ri(17, 23));
+    else spawnShell(ri(4, 38), ri(6, 11)); } }
+  // enemy rifles across the way: chips on the parapet, heads kept down
+  sim.nextEnemyShot -= dt;
+  if (sim.nextEnemyShot <= 0){ sim.nextEnemyShot = rr(3, 7);
+    const gx = ri(5, 37), shooter = { fx: gx + 0.5, fy: enemyY(gx) + 0.5, z: -1 };
+    const post = pick(sim.map.sentryTiles);
+    const tgt = rng() < 0.5 ? { fx: post[0] + 0.5, fy: post[1] + 0.24, z: -0.45 }
+                            : { fx: ri(5, 37) + 0.5, fy: trenchY(ri(5, 37)) - 0.5, z: 0 };
+    fireTracer(shooter, tgt);
+    const near = sim.soldiers.find(o => !o.enemy && !o.dead && o.state === 'watch' && Math.hypot(o.fx - tgt.fx, o.fy - tgt.fy) < 1.6);
+    if (near){ if (rng() < 0.13) wound(near, 'shot'); else near.duck = Math.max(near.duck, rr(0.8, 1.6)); } }
+  if ((sim.hour > 19 || sim.hour < 5) && rng() < dt * 0.25 && sim.parts.filter(p => p.kind === 'flare').length < 2)
+    sim.parts.push({ kind:'flare', fx: rr(8, 34), fy: rr(6.5, 9.5), z: 0, h: rr(120, 170), t: 0, life: rr(6, 10), col: rng() < 0.6 ? 'accent' : 'accent2' });
+  // raids in the dark
+  const night = sim.hour > 19.6 || sim.hour < 4.8;
+  if (!sim.raid.active && night && sim.t > sim.nextRaid){ sim.raid.active = true; sim.raid.t = 0;
+    const n = ri(4, 6);
+    for (let i = 0; i < n; i++){ const gx = ri(6, 36); const r = makeSoldier('raid', [gx, enemyY(gx)]);
+      r.enemy = true; r.crouch = true; r.speed = rr(0.5, 0.66);
+      sim.soldiers.push(r);
+      const tg = ri(5, 37); goTo(r, tg, trenchY(tg), { enemy: true, scramble: true, state: 'walk' }); } }
+  if (sim.raid.active){ sim.raid.t += dt;
+    const alive = sim.soldiers.filter(s => s.enemy && !s.dead);
+    if (!alive.length || sim.raid.t > 110){ sim.raid.active = false; sim.nextRaid = sim.t + rr(150, 320);
+      alive.forEach(r => { r.crouch = true; const gx = ri(6, 36); goTo(r, gx, enemyY(gx), { enemy: true, scramble: true, act: 'despawn' }); }); } }
+  // comms cut
+  if (rng() < dt * 0.008) sim.commHit = 1;
+  // the wire party and the morning after
+  if (!sim.dawnDone && sim.hour >= 5.8 && sim.hour < 6.4){ sim.dawnDone = true;
+    sim.corpses.forEach(c => { sim.graves++; c.gone = true; sim.pendingRookie = sim.pendingRookie || c.friend; });
+    sim.corpses = []; }
+  if (sim.hour > 7) sim.dawnDone = false;
+}
+/* ================= the works: jobs, repairs, and the big project ================= */
+function regenJobs(){
+  const held = new Set(sim.soldiers.filter(s => s.job).map(s => s.job.type + ':' + s.job.gx + ',' + s.job.gy));
+  const jobs = []; let dmgSum = 0, dmgN = 0, fills = 0;
+  for (let gy = 0; gy < MH; gy++) for (let gx = 0; gx < MW; gx++){ const t = sim.grid[gy][gx];
+    if (t.type === 'trench' || t.type === 'dug'){ dmgSum += t.damage; dmgN++;
+      if ((t.damage >= 0.3 || t.rubble >= 0.3) && !held.has('repair:' + gx + ',' + gy)) jobs.push({ type:'repair', gx, gy }); }
+    else if (t.type === 'crater' && !t.filled && gy >= 10 && gy <= 16 && fills < 2 && !held.has('fill:' + gx + ',' + gy)){ jobs.push({ type:'fill', gx, gy }); fills++; } }
+  sim.avgDamage = dmgN ? dmgSum / dmgN : 0;
+  if (sim.project){ const P = sim.project;
+    const stand = P.idx === 0 ? [P.gx, trenchY(P.gx)] : P.tiles[P.idx - 1];
+    const n = sim.soldiers.filter(s => s.job && s.job.type === 'project').length;
+    for (let i = n; i < 2; i++) jobs.push({ type:'project', gx: P.tiles[P.idx][0], gy: P.tiles[P.idx][1], stand }); }
+  sim.jobs = jobs;
+}
+function maybeStartProject(){
+  if (sim.project || sim.sapDone || sim.raid.active || sim.t < 420 || sim.crates < 4 || (sim.avgDamage || 0) >= 0.3) return;
+  const starts = []; for (let gx = 8; gx <= 34; gx++) starts.push(gx);
+  starts.sort(() => rng() - 0.5);
+  for (const gx of starts){ const ly = trenchY(gx);
+    const tiles = [[gx, ly - 1], [gx, ly - 2], [gx, ly - 3]];
+    if (tiles.every(([x, y]) => { const t = tileAt(x, y); return t && t.type === 'ground'; })){
+      sim.project = { gx, tiles, idx: 0, stage: 'dig', prog: 0 }; return; } }
+}
+function projectWork(s, j, dt){
+  const P = sim.project; if (!P){ s.job = null; return; }
+  const ct = tileAt(P.tiles[P.idx][0], P.tiles[P.idx][1]); if (!ct){ s.job = null; return; }
+  s.vig = { pose:'repair', t: 0.34 };
+  s.faceA = Math.atan2(ct.gy + 0.5 - s.fy, ct.gx + 0.5 - s.fx);
+  if (P.stage === 'dig'){ ct.type = 'sapdig'; P.prog += dt; ct.z = -Math.min(1, P.prog / 16);
+    if (P.prog >= 16){ ct.type = 'trench'; ct.z = -1; ct.sap = true; P.stage = 'fit'; P.prog = 0; } }
+  else { P.prog += dt;
+    if (P.prog >= 6){ ct.fitted = true; P.idx++; P.stage = 'dig'; P.prog = 0;
+      if (P.idx >= P.tiles.length){ sim.sapPost = P.tiles[P.tiles.length - 1]; sim.project = null; sim.sapDone = true; s.job = null; } } }
+}
+function updateClimate(dt){
+  const sunA = ((sim.hour - 6) / 12) * Math.PI;
+  simLight = clamp(Math.sin(sunA), 0, 1);
+  if (sim.hour < 5.4 || sim.hour > 19.2) simLight = 0;
+  const dayWarm = sim.season === 'hot' ? 15 : sim.season === 'cold' ? 1.5 : 8.5;
+  const target = dayWarm + simLight * 7 - (simLight === 0 ? 4.5 : 0);
+  sim.temp += (target - sim.temp) * dt * 0.008;
+  if (sim.rain > 0.02){ sim.water = Math.min(10, sim.water + dt * sim.rain * 0.16); }
+  sim.water = Math.max(0, sim.water - dt * 0.006 * (sim.temp > 2 ? 1 : 0.25));
+  sim.frozen = sim.temp < 0.4 && sim.water > 1.5;
+  sim.snow = sim.season === 'cold' ? clamp(sim.snow + dt * 0.002 * (sim.temp < 1 ? 1 : -1), 0, 0.8) : Math.max(0, sim.snow - dt * 0.01);
+  sim.speedK = clamp(0.66 + sim.crates * 0.05 - (sim.temp < 0 ? 0.09 : 0), 0.58, 1);
+}
+function updateSoldier(s, dt){
+  s.stateAge += dt;
+  if (s.vig){ s.vig.t -= dt; if (s.vig.t <= 0) s.vig = null; }
+  if (s.duck > 0) s.duck -= dt;
+  if (s.clean > 0) s.clean = Math.max(0, s.clean - dt * 0.008);
+  s.letterT += dt;
+  if (s.dead) return;
+  if (s.state === 'down'){ // dragged by the medic
+    if (s.draggedBy && !s.draggedBy.dead){ const m = s.draggedBy;
+      s.fx = m.fx - Math.cos(m.faceA) * 0.95; s.fy = m.fy - Math.sin(m.faceA) * 0.95; s.z = m.z; }
+    return; }
+  if (s.state === 'grapple' && s.foe){ const f = s.foe;
+    s.faceA = Math.atan2(f.fy - s.fy, f.fx - s.fx); f.faceA = Math.atan2(s.fy - f.fy, s.fx - f.fx);
+    s.foeT -= dt;
+    if (s.foeT <= 0 && s.foeLead){ s.foeLead = false; f.foeLead = false;
+      const loserWins = rng();
+      const loser = loserWins < 0.5 ? s : f, winner = loser === s ? f : s;
+      if (rng() < 0.24){ fireTracer(winner, loser); killSoldier(loser, 'raid'); }   // point blank
+      else { if (rng() < 0.45) killSoldier(loser, 'raid'); else wound(loser, 'raid');
+             if (rng() < 0.2) wound(winner, 'raid'); }
+      winner.jumpy = 2880; winner.state = 'idle'; winner.tState = 1; winner.foe = null;
+      if (winner.enemy && !winner.dead){ const tg = ri(5, 37); goTo(winner, tg, trenchY(tg), { enemy: true, scramble: true, state: 'walk' }); winner.crouch = false; }
+      if (!winner.enemy) think(winner);
+    }
+    return; }
+  soldierMove(s, dt);
+  // the works: repair, filling, and the project get his hands until they are done
+  if (s.job && !s.path && !s.climbing && s.state !== 'grapple'){ const j = s.job, tt = tileAt(j.gx, j.gy);
+    const anch = j.stand || [j.gx, j.gy];
+    const near = Math.hypot(s.fx - (anch[0] + 0.5), s.fy - (anch[1] + 0.5)) < 1.25;
+    if (near && tt){ s.vig = { pose:'repair', t: 0.34 }; s.faceA = Math.atan2(j.gy + 0.5 - s.fy, j.gx + 0.5 - s.fx);
+      j.prog = (j.prog || 0) + dt;
+      if (j.type === 'repair'){ tt.damage = Math.max(0, tt.damage - dt * 0.11); tt.rubble = Math.max(0, tt.rubble - dt * 0.08);
+        if (tt.damage <= 0.04 && tt.rubble <= 0.04){ tt.damage = 0; tt.rubble = 0; tt.patched++; s.job = null; setState(s, 'idle', 0.5); } }
+      else if (j.type === 'fill'){ if (j.prog > 9){ tt.filled = true; tt.z = -0.18; s.job = null; setState(s, 'idle', 0.5); } }
+      else if (j.type === 'project') projectWork(s, j, dt); }
+    else if (s.stateAge > 24) s.job = null; }
+  // medic pickup and delivery
+  if (s.duty === 'fetch' && sim.woundedRef){ const w = sim.woundedRef;
+    if (Math.hypot(w.fx - s.fx, w.fy - s.fy) < 1){ w.draggedBy = s; s.duty = 'deliver';
+      goTo(s, 27, 16, { act: 'idle' }); setState(s, 'drag', 60); } }
+  else if (s.duty === 'deliver'){ const w = sim.woundedRef;
+    if (w && !s.path){ w.draggedBy = null; w.fx = 28.5; w.fy = 17.5; w.z = -1; w.state = 'sleep';
+      setState(w, 'sleep', rr(25, 45)); sim.woundedRef = null; s.duty = null; setState(s, 'idle', 1); } }
+  if (s.state === 'sleep' && s.stateAge > s.tState - 1 && s.role !== 'carrier'){ setState(s, 'idle', 0.1); }
+  if (s.state === 'watch'){ s.onStep = true;
+    const foe = sim.soldiers.find(o => o.enemy && !o.dead && Math.hypot(o.fx - s.fx, o.fy - s.fy) < 9);
+    s.faceA = foe ? Math.atan2(foe.fy - s.fy, foe.fx - s.fx) : -Math.PI / 2 + Math.sin(perfT * 0.24 + s.id) * 0.3;
+    s.shootAt -= dt;
+    if (s.shootAt <= 0){ s.shootAt = rr(1.6, 4.4);
+      const target = foe || { fx: rr(4, 38), fy: enemyY(ri(4, 38)), z: -1 };
+      if (s.duck > 0.2 && rng() < 0.6){ /* head stays down */ }
+      else if (rng() < 0.14 && !s.fumbled){ s.fumbled = true; s.shootAt = rr(1, 1.8); }        // the bolt sticks
+      else { s.fumbled = false; setState(s, 'watch', rr(3, 7)); fireTracer(s, target);
+        if (foe && rng() < 0.3) wound(foe, 'shot');
+        if (!foe && rng() < 0.1){ const e = sim.soldiers.find(o => !o.enemy && !o.dead && o.state === 'watch');
+          if (e) e.duck = Math.max(e.duck, 1); } } }
+    return; }
+  if (s.enemy && !s.dead){ if (s.state !== 'grapple'){ // raider hunts across the trench floor
+      const prey = sim.soldiers.filter(o => !o.enemy && !o.dead && o.state !== 'down')
+        .sort((a, b) => Math.hypot(a.fx - s.fx, a.fy - s.fy) - Math.hypot(b.fx - s.fx, b.fy - s.fy))[0];
+      if (prey){ const d = Math.hypot(prey.fx - s.fx, prey.fy - s.fy);
+        if (d < 0.95 && Math.abs(prey.fy - s.fy) < 1.6){ s.state = 'grapple'; prey.state = 'grapple';
+          s.foe = prey; prey.foe = s; s.foeT = rr(2.5, 6); s.foeLead = true; s.path = null; prey.path = null; }
+        else if (!s.path && d > 0.95 && Math.floor(s.fy) === trenchY(Math.floor(s.fx)))
+          goTo(s, Math.floor(prey.fx), Math.floor(prey.fy), { scramble: true, state: 'walk' }); } }
+    return; }
+  if (!s.path && !s.vig && s.tState <= 0) think(s);
+  if (s.tState > 0 && !s.path) s.tState -= dt;
+}
+function updateParts(dt){
+  for (const p of sim.parts){ p.t += dt;
+    if (p.kind === 'shell'){ p.p += dt / p.dur;
+      if (p.p >= 1){ p.life = 0; burst(p.tx, p.ty); } continue; }
+    if (p.kind === 'dirt'){ p.ox += p.vx * dt; p.oy += p.vy * dt; p.h += p.vh * dt; p.vh -= 340 * dt; if (p.h < 0) p.h = 0; }
+    if (p.kind === 'steam'){ p.ox = (p.ox || 0) + p.vx * dt * 0.2; p.h = (p.h || 8) + (p.vh || 12) * dt; }
+    if (p.kind === 'flare'){ p.h -= dt * 4.6; p.fx += dt * 0.06; if (p.h < 26) p.life = Math.min(p.life, 0.6); } }
+  sim.parts = sim.parts.filter(p => p.t < (p.life || 1));
+  sim.lights.forEach(L => L.t += dt); sim.lights = sim.lights.filter(L => L.t < L.ttl);
+  /* scorch is permanent: shells write on the land for good */
+}
+function update(dt){
+  perfT += dt; sim.t += dt;
+  sim.hour = (sim.hour + dt * 24 / DAY_LEN) % 24;
+  updateClimate(dt); updateEvents(dt); directorTick(dt);
+  sim.jobT -= dt; if (sim.jobT <= 0){ sim.jobT = 2.5; regenJobs(); }
+  sim.projT -= dt; if (sim.projT <= 0){ sim.projT = 15; maybeStartProject(); }
+  sim.supplyT -= dt;
+  if (sim.supplyT <= 0){ sim.supplyT = rr(70, 130);
+    const c = makeSoldier('carrier', [1, 23]); c.leg = 'in'; c.clean = 1;
+    if (sim.pendingRookie){ c.rookie = true; c.leg = 'in'; c.clean = 1; sim.rookieGreeter = sim.pendingRookie; sim.pendingRookie = 0; }
+    sim.soldiers.push(c); goTo(c, 20, 18, { state: 'carry' }); setState(c, 'carry', 90); }
+  sim.soldiers.forEach(s => updateSoldier(s, dt));
+  sim.soldiers = sim.soldiers.filter(s => !s.gone);
+  updateParts(dt);
+  if (sim.df > 0) sim.df -= dt; if (sim.shake > 0) sim.shake = Math.max(0, sim.shake - dt * 16);
+  camUpdate(dt);
+}
+
+/* ================= drawing the world ================= */
+const LC = document.createElement('canvas'), lctx = LC.getContext('2d');
+function w2s(fx, fy, z){ return [ (isoX(fx, fy) - cam.x) * cam.zoom + VW / 2, (isoY(fx, fy, z) - cam.y) * cam.zoom + VH / 2 ]; }
+function drawSky(){
+  const top = simLight > 0.03 ? PAL.skyDay : PAL.skyNight;
+  const g = ctx.createLinearGradient(0, 0, 0, VH);
+  g.addColorStop(0, top); g.addColorStop(1, PAL.soilDeep);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, VW, VH);
+  if (simLight < 0.35) sim.stars.forEach(st => {                                   // stars, slight parallax
+    const sx = ((st.x * VW - cam.x * 0.02) % VW + VW) % VW, sy = st.y * VH;
+    ctx.fillStyle = `rgba(220,224,235,${(0.35 - simLight) * st.b})`;
+    ctx.fillRect(sx, sy, st.r, st.r); });
+  const orbA = ((sim.hour - 6) / 12) * Math.PI;
+  const ox = VW * (0.14 + 0.72 * ((sim.hour - 6) / 12)) - cam.x * 0.03, oy = VH * 0.62 - Math.sin(orbA) * VH * 0.44;
+  if (simLight > 0.02){ const sg = ctx.createRadialGradient(ox, oy, 2, ox, oy, 60);
+    sg.addColorStop(0, 'rgba(255,240,200,.8)'); sg.addColorStop(1, 'rgba(255,240,200,0)');
+    ctx.fillStyle = sg; ctx.fillRect(ox - 60, oy - 60, 120, 120); }
+  else { ctx.fillStyle = PAL.moon; ctx.beginPath(); ctx.arc(ox, oy, 13, 0, 6.29); ctx.fill();
+    ctx.fillStyle = 'rgba(10,10,16,.5)'; ctx.beginPath(); ctx.arc(ox + 5, oy - 3, 3.4, 0, 6.29); ctx.arc(ox - 4, oy + 5, 2.4, 0, 6.29); ctx.fill(); }
+  if (sim.culture.skyRing){ const px2 = VW * 0.78 - cam.x * 0.02, py2 = VH * 0.17;
+    ctx.fillStyle = 'rgba(186,194,212,.8)'; ctx.beginPath(); ctx.arc(px2, py2, 15, 0, 6.29); ctx.fill();
+    ctx.fillStyle = 'rgba(120,128,148,.55)'; ctx.beginPath(); ctx.arc(px2 + 5, py2 + 4, 12.4, 0, 6.29); ctx.fill();
+    ctx.strokeStyle = 'rgba(200,205,220,.4)'; ctx.lineWidth = 2.2;
+    ctx.beginPath(); ctx.ellipse(px2, py2, 40, 9, -0.32, 0, 6.29); ctx.stroke(); }
+}
+function drawPart(p){
+  if (p.kind === 'dirt'){ ctx.fillStyle = p.col; ctx.globalAlpha = Math.max(0, 1 - p.t / p.life);
+    const sx = isoX(p.fx, p.fy) + (p.ox || 0), sy = isoY(p.fx, p.fy, p.z) + (p.oy || 0) - (p.h || 0);
+    ctx.beginPath(); ctx.arc(sx, sy, p.r, 0, 6.29); ctx.fill(); ctx.globalAlpha = 1; }
+  else if (p.kind === 'ring'){ ctx.strokeStyle = `rgba(210,200,180,${0.5 * (1 - p.t / p.life)})`; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.ellipse(isoX(p.fx, p.fy), isoY(p.fx, p.fy, p.z), 8 + p.t / p.life * 30, (8 + p.t / p.life * 30) * 0.36, 0, 0, 6.29); ctx.stroke(); }
+  else if (p.kind === 'steam'){ ctx.fillStyle = 'rgba(200,200,196,.13)';
+    const sx = isoX(p.fx, p.fy) + (p.ox || 0), sy = isoY(p.fx, p.fy, p.z) - (p.h || 8);
+    ctx.beginPath(); ctx.arc(sx, sy, p.r * (1 + p.t), 0, 6.29); ctx.fill(); }
+  else if (p.kind === 'tracer'){ ctx.strokeStyle = `rgba(255,214,140,${0.85 * (1 - p.t / p.life)})`; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.moveTo(isoX(p.fx0, p.fy0), isoY(p.fx0, p.fy0, p.z0));
+    ctx.lineTo(isoX(p.fx1, p.fy1), isoY(p.fx1, p.fy1, p.z1)); ctx.stroke(); }
+  else if (p.kind === 'shell'){ const px = lerp(p.fx, p.tx, p.p), py = lerp(p.fy, p.ty, p.p), h = 250 * (1 - p.p) * (1 - p.p) + 4;
+    ctx.fillStyle = '#0c0a08'; ctx.beginPath();
+    ctx.arc(isoX(px, py), isoY(px, py, p.z) - h, 2.4, 0, 6.29); ctx.fill(); }
+  else if (p.kind === 'flare'){ const col = p.col === 'accent' ? PAL.accent : PAL.accent2;
+    const sx = isoX(p.fx, p.fy), sy = isoY(p.fx, p.fy, 0) - p.h;
+    const g = ctx.createRadialGradient(sx, sy, 1, sx, sy, 30);
+    g.addColorStop(0, col); g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g; ctx.fillRect(sx - 30, sy - 30, 60, 60);
+    ctx.fillStyle = '#fff4d6'; ctx.beginPath(); ctx.arc(sx, sy, 2.4, 0, 6.29); ctx.fill(); }
+}
+const drops = Array.from({ length: 110 }, () => ({ x: Math.random() * 1400, y: Math.random() * 800, s: rr(0.7, 1.3) }));
+function draw(){
+  if (!sim) return;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  drawSky();
+  ctx.save();
+  const shx = sim.shake ? rr(-sim.shake, sim.shake) : 0, shy = sim.shake ? rr(-sim.shake, sim.shake) * 0.6 : 0;
+  ctx.translate(VW / 2 + shx, VH / 2 + shy); ctx.scale(cam.zoom, cam.zoom); ctx.translate(-cam.x, -cam.y);
+  for (let s = 0; s <= MW + MH; s++) for (let gx = 0; gx < MW; gx++){ const gy = s - gx; const t = tileAt(gx, gy); if (t) drawTile(t); }
+  const items = [];
+  sim.props.forEach(p => items.push({ k: p.fx + p.fy, f: () => drawProp(p) }));
+  for (let i = 0; i < sim.graves && i < sim.map.graveTiles.length; i++){ const [gx, gy] = sim.map.graveTiles[i];
+    items.push({ k: gx + gy + 0.6, f: () => drawProp({ kind: 'grave', fx: gx + 0.5, fy: gy + 0.5, z: 0 }) }); }
+  sim.soldiers.forEach(s => { if (!s.gone) items.push({ k: s.fx + s.fy + 0.3, f: () => drawMan(s) }); });
+  sim.parts.forEach(p => items.push({ k: (p.fx ?? p.tx ?? 0) + (p.fy ?? p.ty ?? 0) + 0.5, f: () => drawPart(p) }));
+  items.sort((a, b) => a.k - b.k).forEach(it => it.f());
+  ctx.restore();
+  /* precipitation, screen space */
+  if (sim.rain > 0.03 && !sim.frozen){ ctx.strokeStyle = `rgba(170,190,215,${0.4 * sim.rain})`; ctx.lineWidth = 1;
+    ctx.beginPath(); drops.forEach(d => { d.y += 15 * d.s; d.x += 2.4; if (d.y > VH){ d.y = -8; d.x = Math.random() * VW; }
+      ctx.moveTo(d.x % VW, d.y); ctx.lineTo(d.x % VW - 2.2, d.y + 9 * d.s); }); ctx.stroke(); }
+  else if (sim.snow > 0.06){ ctx.fillStyle = 'rgba(235,240,246,.75)';
+    drops.forEach(d => { d.y += 1.1 * d.s; d.x += Math.sin(perfT + d.s * 9) * 0.5; if (d.y > VH){ d.y = -4; d.x = Math.random() * VW; }
+      ctx.fillRect(d.x % VW, d.y, 1.8, 1.8); }); }
+  /* lighting */
+  const dark = (1 - simLight) * 0.84;
+  if (dark > 0.02){ LC.width = VW >> 1; LC.height = VH >> 1;
+    lctx.clearRect(0, 0, LC.width, LC.height);
+    lctx.fillStyle = `rgba(6,8,20,${dark})`; lctx.fillRect(0, 0, LC.width, LC.height);
+    lctx.globalCompositeOperation = 'destination-out';
+    const hole = (fx, fy, z, r, str) => { const [sx, sy] = w2s(fx, fy, z);
+      const g = lctx.createRadialGradient(sx / 2, sy / 2, 1, sx / 2, sy / 2, r * cam.zoom / 2);
+      g.addColorStop(0, `rgba(0,0,0,${str})`); g.addColorStop(1, 'rgba(0,0,0,0)');
+      lctx.fillStyle = g; lctx.fillRect(sx / 2 - r, sy / 2 - r, r * 2, r * 2); };
+    hole(10.5, 16.5, -1, 95, 0.95); hole(19.5, trenchY(19) + 0.5, -1, 75, 0.85); hole(27.5, 16.5, -1, 70, 0.8);
+    sim.parts.forEach(p => { if (p.kind === 'flare') hole(p.fx, p.fy, p.h / ZH, 150, 0.9); });
+    sim.lights.forEach(L => hole(L.fx, L.fy, L.z, L.r, 0.95 * (1 - L.t / L.ttl)));
+    lctx.globalCompositeOperation = 'source-over';
+    ctx.imageSmoothingEnabled = true; ctx.drawImage(LC, 0, 0, VW, VH); }
+  ctx.fillStyle = `rgba(28,44,74,${0.05 + (1 - simLight) * 0.06})`; ctx.fillRect(0, 0, VW, VH);
+  if (sim.t < 8){ ctx.globalAlpha = Math.min(1, sim.t / 1.4, (8 - sim.t) / 3);
+    ctx.fillStyle = PAL.moon; ctx.font = '26px Georgia'; ctx.textAlign = 'center';
+    ctx.fillText(sim.planet.toUpperCase().split('').join('  '), VW / 2, VH * 0.2); ctx.globalAlpha = 1; }
+  const vg = ctx.createRadialGradient(VW / 2, VH / 2, Math.min(VW, VH) * 0.44, VW / 2, VH / 2, Math.max(VW, VH) * 0.78);
+  vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,.4)');
+  ctx.fillStyle = vg; ctx.fillRect(0, 0, VW, VH);
+}
+
+/* ================= a new war ================= */
+function newSim(planetName, seedStr){
+  rng = mulberry32(hashStr(seedStr + '|' + planetName));
+  PAL = makePalette();
+  const culture = { helm: pick(['brim','dome','cap']), enemyHelm: pick(['dome','brim','cap']),
+    grave: pick(['cross','stone','helmet']), rifleLen: rr(20, 29), skyRing: rng() < 0.34 };
+  const map = buildMap();
+  map.bunkSet = new Set(map.bunkTiles.map(t => t[0] + ',' + t[1]));
+  map.noCrater = new Set([...map.hatchTiles, ...map.graveTiles, ...map.bunkTiles].map(t => t[0] + ',' + t[1]));
+  sim = { planet: planetName, culture, map, grid: map.grid, t: 0, hour: 6.3, day: 1,
+    soldiers: [], parts: [], lights: [], props: [], scorch: new Map(), corpses: [],
+    crates: 3, graves: 0, water: rr(0, 3), rain: 0, snow: 0, frozen: false, temp: 8,
+    season: pick(['wet','dry','cold','wet','hot']), commHit: 0, woundedRef: null,
+    nextShell: 5, nextRaid: 200, nextEnemyShot: 5, raid: { active: false, t: 0 }, supplyT: rr(20, 40),
+    jobs: [], jobT: 0, projT: 25, project: null, sapDone: false, sapPost: null, avgDamage: 0,
+    directorT: 14, shake: 0, df: 0, speedK: 1, dawnDone: false, pendingRookie: 0, rookieGreeter: 0,
+    stars: Array.from({ length: 120 }, () => ({ x: rng(), y: rng() * 0.55, r: rr(0.8, 1.9), b: rr(0.4, 1) })),
+    trenchTiles: lineTiles(), dugA: dugTiles(9, 12), dugB: dugTiles(26, 29) };
+  sim.props = buildProps();
+  const add = (role, tile, extra) => { const s = makeSoldier(role, tile);
+    if (extra) Object.assign(s, extra); sim.soldiers.push(s); return s; };
+  [0, 3, 6].forEach(i => { const st = map.sentryTiles[i]; const s = add('sent', st, { postI: i }); s.onStep = true; s.fy = st[1] + 0.24; setState(s, 'watch', rr(3, 7)); });
+  for (let i = 0; i < 5; i++){ const t = pick(sim.trenchTiles); add('rifle', t); }
+  add('vet', [11, 16]); add('cook', [18, trenchY(18)]); add('sign', [10, 16]);
+  add('medic', [27, 16]); add('runner', [19, trenchY(19)]);
+  sim.soldiers.forEach((s, i) => { const o = sim.soldiers[(i + 3) % sim.soldiers.length]; s.friend = o.id; if (o.friend === -1 || o.friend === o.id) o.friend = s.id; });
+}
+
+/* ================= setup + main loop ================= */
+const $ = id => document.getElementById(id);
+const qs = new URLSearchParams(location.search);
+function startSim(){
+  const planet = (($('planet').value || '').trim() || qs.get('planet') || 'Unnamed');
+  const seed = (($('seed').value || '').trim() || qs.get('seed') || String(ri(1, 99999)));
+  $('setup').style.display = 'none';
+  newSim(planet, seed);
+  if (qs.get('hour')) sim.hour = parseFloat(qs.get('hour'));
+  if (qs.get('warp')){ const steps = Math.min(16000, Math.round(parseFloat(qs.get('warp')) * 20));
+    for (let i = 0; i < steps; i++) update(1 / 20); }
+  if (qs.get('raid')) sim.nextRaid = Math.min(sim.nextRaid, 1);
+  if (qs.get('camx')) { cam.mode = 'user'; cam.idleT = -9999; cam.x = parseFloat(qs.get('camx')); cam.y = parseFloat(qs.get('camy') || '330');
+    cam.zoom = parseFloat(qs.get('zoom') || '1'); }
+  window.__sim = sim; window.__shotReady = true;
+}
+$('dice').addEventListener('click', () => { $('seed').value = String(ri(1, 999999)); });
+$('begin').addEventListener('click', startSim);
+$('planet').addEventListener('keydown', e => { if (e.key === 'Enter') startSim(); });
+$('seed').addEventListener('keydown', e => { if (e.key === 'Enter') startSim(); });
+if (qs.get('auto')) startSim();
+let lastT = performance.now();
+function loop(now){ requestAnimationFrame(loop);
+  const dt = Math.min(0.05, (now - lastT) / 1000); lastT = now;
+  if (sim){ update(dt); draw(); } }
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
