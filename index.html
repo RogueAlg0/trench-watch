@@ -1548,7 +1548,7 @@ function burst(bx, by){
   for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++){
     const tt = tileAt(cx + dx, cy + dy); if (!tt) continue;
     const centre = dx === 0 && dy === 0;
-    if (tt.type === 'trench' || tt.type === 'dug'){ tt.damage = Math.min(1, tt.damage + (centre ? 0.55 : 0.22)); if (centre) tt.rubble = Math.min(1, tt.rubble + 0.5); }
+    if (tt.type === 'trench' || tt.type === 'dug' || tt.type === 'etrench'){ tt.damage = Math.min(1, tt.damage + (centre ? 0.55 : 0.22)); if (centre) tt.rubble = Math.min(1, tt.rubble + 0.5); }
     else if (tt.type === 'ground'){ tt.damage = Math.min(1, tt.damage + (centre ? 0.4 : 0.22));
       if (centre && rng() < 0.55 && !sim.map.noCrater.has(tt.gx + ',' + tt.gy)){ tt.type = 'crater'; tt.z = -0.35; tt.filled = false; } } }
   sim.lights.push({ fx: bx, fy: by, z: t.z, r: 120, t: 0, ttl: 0.28 });
@@ -1719,7 +1719,7 @@ function regenJobs(){
   for (let gy = 0; gy < MH; gy++) for (let gx = 0; gx < MW; gx++){ const t = sim.grid[gy][gx];
     if (t.type === 'trench' || t.type === 'dug'){ dmgSum += t.damage; dmgN++; dmgSec[gx < 33 ? 0 : gx < 61 ? 1 : 2] += t.damage;
       if ((t.damage >= 0.3 || t.rubble >= 0.3) && !held.has('repair:' + gx + ',' + gy)) jobs.push({ type:'repair', gx, gy, t: rr(4, 8) }); }
-    else if (t.type === 'crater' && !t.filled && gy >= 10 && gy <= 16 && fills < 2 && !held.has('fill:' + gx + ',' + gy)){ jobs.push({ type:'fill', gx, gy, t: rr(5, 9) }); fills++; } }
+    else if (t.type === 'crater' && !t.filled && gy >= 17 && fills < 2 && !held.has('fill:' + gx + ',' + gy)){ jobs.push({ type:'fill', gx, gy, t: rr(5, 9) }); fills++; } }
   sim.avgDamage = dmgN ? dmgSum / dmgN : 0;
   if (sim.works){ const W = sim.works;
     const n = sim.soldiers.filter(s => s.job && s.job.type === 'work').length;
@@ -2365,7 +2365,34 @@ function physicsStep(dt){
     if (d < 0.5 && d > 1e-4){ c.fx += dx / d * (0.5 - d); c.fy += dy / d * (0.5 - d);
       if (c.mode !== 'walk'){ c.mode = 'walk'; c.tx = c.fx + dx / d * 1.6; c.ty = clamp(c.fy + dy / d * 1.6, 30, 47); c.t = 1.2; } } }
 }
+function enemyWorksTick(dt){
+  sim.ewT = (sim.ewT || 0) - dt;
+  const night = sim.hour < 5.6 || sim.hour > 19.2;
+  for (const s of sim.soldiers){ if (s.trade !== 'esap' || s.dead || s.gone || s.state === 'down') continue;
+    if (s.ework){ const w = s.ework, d = Math.hypot(w.gx + 0.5 - s.fx, w.gy + 0.5 - s.fy);
+      if (w.phase === 'go' && !s.path && d < 1.5){ w.phase = 'work'; w.t = rr(7, 12); }
+      else if (w.phase === 'work'){ if (d > 1.6){ w.phase = 'go'; if (!s.path) goTo(s, w.gx, w.gy, { enemy: true, scramble: true }); }
+        else { if (!s.vig || s.vig.t < 0.4) s.vig = { pose: 'repair', t: rr(0.8, 1.4) };
+          w.t -= dt;
+          if (w.t <= 0){ const tt = tileAt(w.gx, w.gy); if (tt){ tt.damage = 0; tt.rubble = Math.max(0, (tt.rubble || 0) - 0.5); tt.patched = 1; }
+            markDirty(w.gx, w.gy); s.ework = null; } } }
+      continue; }
+    s.crouch = !s.path;
+    if (sim.ewT > 0) continue;
+    /* pick the worst hurt piece of their line near home, and only under cover of dark unless it is gaping */
+    let best = null, bd = 1e9;
+    for (let gy = 3; gy <= 10; gy++) for (let gx = 4; gx < 88; gx++){ const tt = sim.grid[gy][gx];
+      if (!tt || tt.type !== 'etrench' || tt.damage < 0.3) continue;
+      if (!night && tt.damage < 0.75) continue;
+      if (sim.soldiers.some(o => o.ework && o.ework.gx === gx && o.ework.gy === gy)) continue;
+      const d = Math.hypot(gx - s.fx, gy - s.fy); if (d < bd){ bd = d; best = [gx, gy]; } }
+    if (best){ s.ework = { gx: best[0], gy: best[1], phase: 'go' }; s.crouch = false;
+      goTo(s, best[0], best[1], { enemy: true, scramble: true }); }
+    else if ((Math.floor(s.fx) !== s.hx || Math.floor(s.fy) !== s.hy) && !s.path) goTo(s, s.hx, s.hy, { enemy: true, scramble: true }); }
+  if (sim.ewT <= 0) sim.ewT = 5;
+}
 function updateSystems(dt){
+  enemyWorksTick(dt);
   /* pacing: the war breathes. Stand-to hours are loud, midday is slow, night is tense and low. */
   sim.intensity ??= 0.3; sim.pulseT = Math.max(0, (sim.pulseT || 0) - dt);
   const hf = sim.hour;
@@ -3136,6 +3163,7 @@ function newSim(planetName, seedStr){
       s.role = 'sent'; s.onStep = true; setState(s, 'watch', rr(3, 7)); });
     add('rifle', [sec.dug[0] + 1, 23], { sector: si }); add('rifle', [sec.dug[0] + 2, 22], { sector: si }); });
   [10, 26, 42, 58, 74, 86].forEach(gx => { const s = add('esent', [gx, enemyY(gx)], {}); s.enemy = true; setState(s, 'watch', rr(4, 9)); });
+  [22, 40, 58, 76].forEach(gx => { const s = add('esap', [gx, enemyY(gx)], {}); s.enemy = true; s.hx = gx; s.hy = enemyY(gx); s.crouch = true; setState(s, 'idle', rr(2, 5)); });
   sim.soldiers.forEach((s, i) => { const o = sim.soldiers[(i + 3) % sim.soldiers.length];
     if (!o.enemy && !s.enemy){ s.friend = o.id; if (o.friend === -1) o.friend = s.id; } });
   sim.soldiers.forEach(s => { if (s.friend >= 0){ const f = sim.soldiers.find(x => x.id === s.friend);
