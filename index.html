@@ -150,7 +150,7 @@ fit();
 
 /* ================= the field ================= */
 const DAY_LEN = 130;
-let sim = null, perfT = 0, simLight = 1;
+let sim = null, perfT = 0, simLight = 1, moonI = 0, moonLight = 0, moonCyc = 0;
 const trenchY = gx => 20 + (Math.floor(gx / 4) % 2 ? 1 : 0);
 const supportY = gx => 30 + (Math.floor(gx / 6) % 2 ? 1 : 0);
 const enemyY  = gx => 6 + (Math.floor(gx / 5) % 2 ? 1 : 0);
@@ -234,9 +234,19 @@ function walkable(t, enemy){
 }
 function findPath(sx, sy, tx, ty, opts){
   opts = opts || {};
-  const key = (x, y) => x + ',' + y;
   const start = tileAt(sx, sy), goal = tileAt(tx, ty);
   if (!start || !goal) return null;
+  const blocked = new Set();
+  if (typeof sim !== 'undefined' && sim && sim.soldiers) for (const o of sim.soldiers){
+    if (o.dead || o.gone) continue;
+    if (o.state === 'watch' || o.state === 'sleep' || o.talk || o.inBed || (sim.queue && sim.queue.includes(o.id))){
+      const k = Math.floor(o.fx) + ',' + Math.floor(o.fy);
+      if (k !== sx + ',' + sy) blocked.add(k); } }
+  const p = bfsPath(sx, sy, tx, ty, opts, blocked);
+  return p || bfsPath(sx, sy, tx, ty, opts, null);
+}
+function bfsPath(sx, sy, tx, ty, opts, blocked){
+  const key = (x, y) => x + ',' + y;
   const q = [[sx, sy]], prev = new Map([[key(sx, sy), null]]); let qh = 0;
   while (qh < q.length){ const [cx, cy] = q[qh++];
     if (cx === tx && cy === ty) break;
@@ -244,6 +254,7 @@ function findPath(sx, sy, tx, ty, opts){
     for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
       const nx = cx + dx, ny = cy + dy, nt = tileAt(nx, ny);
       if (!nt || prev.has(key(nx, ny)) || !walkable(nt, opts.enemy)) continue;
+      if (blocked && blocked.has(key(nx, ny)) && !(nx === tx && ny === ty)) continue;
       const dz = Math.abs(nt.z - ct.z);
       const ladderEdge = sim.map.ladders.has(key(cx, cy) + '>' + key(nx, ny));
       if (dz > 0.6 && !ladderEdge && !opts.scramble) continue;
@@ -479,8 +490,8 @@ function goTo(s, gx, gy, opts){
     sm.push(path[path.length - 1]); path = sm; }
   s.path = path; s.pathI = 1;
   s.moveStartT = perfT;
-  s.destFx = (opts.fx !== undefined) ? gx + opts.fx : gx + 0.5;
-  s.destFy = (opts.fy !== undefined) ? gy + opts.fy : gy + 0.5;
+  s.destFx = (opts.fx !== undefined) ? gx + opts.fx : gx + 0.5 + (hash2(gx * 3.1 + s.id * 13.7, gy * 7.7) - 0.5) * 0.44;
+  s.destFy = (opts.fy !== undefined) ? gy + opts.fy : gy + 0.5 + (hash2(gy * 5.3 + s.id * 7.3, gx * 9.1) - 0.5) * 0.44;
   s.arriveAct = opts.act || 'idle'; s.onStep = !!opts.step;
   if (s.state !== 'grapple' && s.state !== 'down') setState(s, opts.state || 'walk', 8);
   return true;
@@ -495,6 +506,11 @@ function soldierMove(s, dt){
   if (!s.path || s.pathI >= s.path.length){
     const tz = (tileAt(Math.floor(s.fx), Math.floor(s.fy)) || { z: 0 }).z + (s.onStep ? 0.55 : 0);
     s.z += (tz - s.z) * Math.min(1, dt * 7); s.vx = 0; s.vy = 0; return; }
+  if (s.yieldT > 0){ s.yieldT -= dt; s.vx = 0; s.vy = 0;
+    const bx2 = s.fx - Math.cos(s.faceA) * 0.3 * dt, by2 = s.fy - Math.sin(s.faceA) * 0.3 * dt;
+    if (walkable(tileAt(Math.floor(bx2), Math.floor(by2)), s.enemy)){ s.fx = bx2; s.fy = by2; }
+    const tz2 = (tileAt(Math.floor(s.fx), Math.floor(s.fy)) || { z: s.z }).z;
+    s.z += (tz2 - s.z) * Math.min(1, dt * 7); return; }
   const node = s.path[s.pathI];
   const isLast = s.pathI === s.path.length - 1;
   const wx = isLast ? s.destFx : node[0] + 0.5, wy = isLast ? s.destFy : node[1] + 0.5;
@@ -506,16 +522,40 @@ function soldierMove(s, dt){
   if (s.stance === 'crouch') sp *= 0.72;                                   // a crouch is careful, not quick
   const tKey = Math.floor(s.fx) + ',' + Math.floor(s.fy);                  // feet wear the ground dark
   if (s.lastTile !== tKey){ s.lastTile = tKey; if (tileHere) tileHere.worn = Math.min(1, tileHere.worn + 0.045); }
-  if (dist < (isLast ? 0.05 : 0.24)){ // flowing advance: corners round off, only the last node is exact
+  /* the passing drill: trenches are one man wide and both of you know it.
+     Someone close ahead means shuffle to your passing side; no room to shuffle
+     means the lesser errand waits and eases back; a blocked node still counts. */
+  let aimX = wx, aimY = wy, sq = 1, blockO = null, lastR = 0.05;
+  { const dirx = dx / (dist || 1), diry = dy / (dist || 1); let blockD = 1e9;
+    for (const o of sim.soldiers){ if (o === s || o.dead || o.gone || o.climbing || o.state === 'down') continue;
+      const rx = o.fx - s.fx, ry = o.fy - s.fy;
+      if (rx > 1.15 || rx < -1.15 || ry > 1.15 || ry < -1.15) continue;
+      if (rx * dirx + ry * diry < 0.1) continue;
+      if (Math.abs(rx * -diry + ry * dirx) > 0.45) continue;
+      const d2 = rx * rx + ry * ry; if (d2 < blockD){ blockD = d2; blockO = o; } }
+    if (isLast){ for (const o of sim.soldiers){ if (o === s || o.dead || o.gone) continue;
+        if (Math.hypot(o.fx - s.destFx, o.fy - s.destFy) < 0.55){ lastR = 0.5; break; } }
+      if (lastR < 0.5 && sim.staticBodies) for (const b of sim.staticBodies){
+        if (Math.hypot(b.fx - s.destFx, b.fy - s.destFy) < b.r + 0.42){ lastR = 0.55; break; } } }
+    if (blockO){ const px = diry, py = -dirx, ox = s.fx + px * 0.36, oy = s.fy + py * 0.36;
+      const anchored = blockO.state === 'watch' || blockO.state === 'sleep';
+      if (walkable(tileAt(Math.floor(ox), Math.floor(oy)), s.enemy)){ aimX = wx + px * 0.36; aimY = wy + py * 0.36; sq = 0.55; }
+      else if (!anchored && blockO.path && (bodyPriority(s) < bodyPriority(blockO) || (bodyPriority(s) === bodyPriority(blockO) && s.id > blockO.id))){
+        s.yieldT = rr(0.4, 0.7); }
+      else sq = 0.4; } }
+  if (isLast && dist < 0.7){ s.lastT = (s.lastT || 0) + dt; if (s.lastT > 2.5) lastR = Math.max(lastR, 0.7); } else s.lastT = 0;
+  if (dist < (isLast ? lastR : 0.24) || (!isLast && blockO && dist < 0.5)){ // flowing advance: corners round off, only the last node is exact
     const cur = tileAt(Math.floor(s.fx), Math.floor(s.fy)), nxt = tileAt(node[0], node[1]);
     s.pathI++;
     if (s.pathI >= s.path.length){ s.path = null; arrive(s); return; }
     return; }
-  const mx = dx / dist, my = dy / dist;
-  s.vx = mx * sp; s.vy = my * sp;
-  s.fx += mx * Math.min(dist, sp * dt); s.fy += my * Math.min(dist, sp * dt);
+  const adx = aimX - s.fx, ady = aimY - s.fy, adist = Math.hypot(adx, ady) || 1;
+  const mx = adx / adist, my = ady / adist;
+  s.vx = mx * sp * sq; s.vy = my * sp * sq;
+  const stepL = Math.min(adist, sp * sq * dt);
+  s.fx += mx * stepL; s.fy += my * stepL;
   s.faceA = Math.atan2(my, mx);
-  s.phase += sp * dt * 4.4;
+  s.phase += sp * sq * dt * 4.4;
   // stepping into a tile of a different height: ladders and scrambles are events, not glides
   const here = tileAt(Math.floor(s.fx), Math.floor(s.fy));
   if (here && Math.abs(here.z - s.z) > 0.6 && !s.climbing)
@@ -527,6 +567,9 @@ function soldierMove(s, dt){
 }
 function arrive(s){
   s.settleT = perfT;
+  if (s.resumeDest){ const rd = s.resumeDest; s.resumeDest = null; s.stallN = 0; s.arriveAct = null;
+    if (goTo(s, rd[0], rd[1], { act: rd[2] || 'idle' })) return; }
+  s.stallN = 0;
   const act = s.arriveAct; s.arriveAct = null;
   if (s.role === 'carrier' && s.leg){ arriveCarrier(s); return; }
   if (act === 'bow'){ s.vig = { pose: 'bow', t: rr(5, 8) }; setState(s, 'idle', 1); }
@@ -1812,6 +1855,9 @@ function updateClimate(dt){
   const sunA = ((sim.hour - 6) / 12) * Math.PI;
   simLight = clamp(Math.sin(sunA), 0, 1);
   if (sim.hour < 5.4 || sim.hour > 19.2) simLight = 0;
+  moonCyc = (((sim.t / DAY_LEN) + (sim.moonOff || 0)) % 29.5) / 29.5;
+  moonI = 0.5 - 0.5 * Math.cos(moonCyc * 6.2832);
+  moonLight = moonI * 0.34 * (1 - simLight);
   const dayWarm = sim.season === 'hot' ? 15 : sim.season === 'cold' ? 1.5 : 8.5;
   const target = dayWarm + simLight * 7 - (simLight === 0 ? 4.5 : 0);
   sim.temp += (target - sim.temp) * dt * 0.008;
@@ -1950,7 +1996,20 @@ function updateSoldier(s, dt){
      (a corner, a jam, a blocked node). Drop the path; his job or his thoughts will re-route him. */
   s.stallT = (s.stallT || 0) + dt;
   if (s.stallT > 3){ s.stallT = 0;
-    if (s.path && !s.climbing && s._lx !== undefined && Math.hypot(s.fx - s._lx, s.fy - s._ly) < 0.3){ s.path = null; s.tState = Math.min(s.tState, 1.5); }
+    if (s.path && !s.climbing && s._lx !== undefined && Math.hypot(s.fx - s._lx, s.fy - s._ly) < 0.3){
+      /* wedged on a man, a prop, a corner: first step out of the wedge, only then give the path up */
+      let stepped = false;
+      if (!s.stallN){ const dgx = Math.floor(s.destFx), dgy = Math.floor(s.destFy);
+        const px = -Math.sin(s.faceA), py = Math.cos(s.faceA);
+        const tries = [[Math.floor(s.fx + px * 0.9), Math.floor(s.fy + py * 0.9)], [Math.floor(s.fx - px * 0.9), Math.floor(s.fy - py * 0.9)],
+          [Math.floor(s.fx - Math.cos(s.faceA) * 0.9), Math.floor(s.fy - Math.sin(s.faceA) * 0.9)]];
+        for (const [tx, ty] of tries){ if (tx === Math.floor(s.fx) && ty === Math.floor(s.fy)) continue;
+          if (!walkable(tileAt(tx, ty), s.enemy)) continue;
+          s.resumeDest = [dgx, dgy, s.arriveAct]; s.stallN = 1;
+          if (goTo(s, tx, ty, { act: 'idle' })){ stepped = true; } else s.resumeDest = null;
+          if (stepped) break; } }
+      if (!stepped){ s.path = null; s.tState = Math.min(s.tState, 1.5); s.stallN = 0; } }
+    else if (!s.path) s.stallN = 0;
     s._lx = s.fx; s._ly = s.fy; }
   const wasMoving = !!s.path;
   soldierMove(s, dt);
@@ -2631,15 +2690,23 @@ function drawSky(){
   ctx.fillStyle = g; ctx.fillRect(0, 0, VW, VH);
   if (simLight < 0.35) sim.stars.forEach(st => {                                   // stars, slight parallax
     const sx = ((st.x * VW - cam.x * 0.02) % VW + VW) % VW, sy = st.y * VH;
-    ctx.fillStyle = `rgba(220,224,235,${(0.35 - simLight) * st.b})`;
+    ctx.fillStyle = `rgba(220,224,235,${(0.35 - simLight) * st.b * (1 - moonI * 0.55)})`;
     ctx.fillRect(sx, sy, st.r, st.r); });
   const orbA = ((sim.hour - 6) / 12) * Math.PI;
   const ox = VW * (0.14 + 0.72 * ((sim.hour - 6) / 12)) - cam.x * 0.03, oy = VH * 0.62 - Math.sin(orbA) * VH * 0.44;
   if (simLight > 0.02){ const sg = ctx.createRadialGradient(ox, oy, 2, ox, oy, 60);
     sg.addColorStop(0, 'rgba(255,240,200,.8)'); sg.addColorStop(1, 'rgba(255,240,200,0)');
     ctx.fillStyle = sg; ctx.fillRect(ox - 60, oy - 60, 120, 120); }
-  else { ctx.fillStyle = PAL.moon; ctx.beginPath(); ctx.arc(ox, oy, 13, 0, 6.29); ctx.fill();
-    ctx.fillStyle = 'rgba(10,10,16,.5)'; ctx.beginPath(); ctx.arc(ox + 5, oy - 3, 3.4, 0, 6.29); ctx.arc(ox - 4, oy + 5, 2.4, 0, 6.29); ctx.fill(); }
+  else { const np = ((sim.hour + 24 - 18.5) % 24) / 12;
+    const mx2 = VW * (0.14 + 0.72 * np) - cam.x * 0.03, my2 = VH * 0.62 - Math.sin(np * Math.PI) * VH * 0.44;
+    const halo = ctx.createRadialGradient(mx2, my2, 4, mx2, my2, 54);
+    halo.addColorStop(0, 'rgba(200,212,238,' + (0.1 + moonI * 0.22) + ')'); halo.addColorStop(1, 'rgba(200,212,238,0)');
+    ctx.fillStyle = halo; ctx.fillRect(mx2 - 54, my2 - 54, 108, 108);
+    ctx.fillStyle = PAL.moon; ctx.beginPath(); ctx.arc(mx2, my2, 13, 0, 6.29); ctx.fill();
+    if (moonI > 0.35){ ctx.fillStyle = 'rgba(120,126,140,.5)'; ctx.beginPath();
+      ctx.arc(mx2 + 5, my2 - 3, 3.4, 0, 6.29); ctx.arc(mx2 - 4, my2 + 5, 2.4, 0, 6.29); ctx.fill(); }
+    const shx = (moonCyc < 0.5 ? -1 : 1) * moonI * 26;   // the terminator sweeps: full cover at new, gone at full
+    ctx.fillStyle = 'rgba(8,9,15,.9)'; ctx.beginPath(); ctx.arc(mx2 + shx, my2, 12.4, 0, 6.29); ctx.fill(); }
   if (sim.culture.skyRing){ const px2 = VW * 0.78 - cam.x * 0.02, py2 = VH * 0.17;
     ctx.fillStyle = 'rgba(186,194,212,.8)'; ctx.beginPath(); ctx.arc(px2, py2, 15, 0, 6.29); ctx.fill();
     ctx.fillStyle = 'rgba(120,128,148,.55)'; ctx.beginPath(); ctx.arc(px2 + 5, py2 + 4, 12.4, 0, 6.29); ctx.fill();
@@ -2920,7 +2987,7 @@ function draw(){
     const my = (i * 97.7 + Math.sin(perfT * 0.23 + i * 1.7) * 22 + perfT * (i % 3)) % (VH + 30) - 15;
     ctx.fillRect(mx, my, i % 4 === 0 ? 2 : 1.2, i % 4 === 0 ? 2 : 1.2); }
   /* lighting: lamps burn oil, and a node with no oil goes dark */
-  const dark = (1 - simLight) * 0.66;
+  const dark = (1 - simLight) * 0.66 * (1 - moonLight * 1.55);
   if (dark > 0.02){ LC.width = VW >> 1; LC.height = VH >> 1;
     lctx.clearRect(0, 0, LC.width, LC.height);
     lctx.fillStyle = `rgba(6,8,20,${dark})`; lctx.fillRect(0, 0, LC.width, LC.height);
@@ -2941,6 +3008,12 @@ function draw(){
     sim.lights.forEach(L => hole(L.fx, L.fy, L.z, L.r, 0.95 * (1 - L.t / L.ttl)));
     lctx.globalCompositeOperation = 'source-over';
     ctx.imageSmoothingEnabled = true; ctx.drawImage(LC, 0, 0, VW, VH); }
+  if (moonLight > 0.03 && simLight < 0.45){ /* moonlight lies on the field in a slow silver pool */
+    const np2 = ((sim.hour + 24 - 18.5) % 24) / 12, mxp = VW * (0.16 + 0.68 * np2), myp = VH * (0.42 + 0.2 * Math.sin(np2 * 3.1416));
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    const mg = ctx.createRadialGradient(mxp, myp, 8, mxp, myp, VW * 0.42);
+    mg.addColorStop(0, 'rgba(186,200,228,' + (moonLight * 0.3) + ')'); mg.addColorStop(1, 'rgba(186,200,228,0)');
+    ctx.fillStyle = mg; ctx.beginPath(); ctx.ellipse(mxp, myp, VW * 0.42, VH * 0.3, 0, 0, 6.29); ctx.fill(); ctx.restore(); }
   if (simLight < 0.5) sim.searchlights.forEach(sl => {             // beams worry the dark
     const [hx, hy] = w2s(sl.gx + 0.5, sl.gy + 0.5, -1);
     const headY = hy - 33 * cam.zoom, sweep = Math.sin(sim.t * 0.1 + sl.gx * 1.7) * 0.62;
@@ -2959,11 +3032,23 @@ function draw(){
     ctx.fillStyle = pool; ctx.beginPath(); ctx.ellipse(ex, ey, w1 * 1.15, w1 * 0.5, 0, 0, 6.29); ctx.fill();
     ctx.fillStyle = 'rgba(255,246,205,.95)'; ctx.beginPath(); ctx.arc(hx, headY, 2.6 * cam.zoom, 0, 6.29); ctx.fill();
     ctx.restore(); });
-  if (simLight > 0.45){ ctx.save(); ctx.globalCompositeOperation = 'multiply';   /* cloud shadows crawl the field */
-    for (let i = 0; i < 3; i++){ const cxp = ((perfT * (4 + i * 1.7) + i * 620) % (VW + 900)) - 450, cyp = VH * (0.2 + i * 0.27) + Math.sin(perfT * 0.05 + i * 2) * 26;
-      const cg = ctx.createRadialGradient(cxp, cyp, 10, cxp, cyp, 300 + i * 90);
-      cg.addColorStop(0, 'rgba(70,72,66,' + (0.16 * simLight) + ')'); cg.addColorStop(1, 'rgba(70,72,66,0)');
-      ctx.fillStyle = cg; ctx.fillRect(cxp - 420, cyp - 300, 840, 600); }
+  const cover = clamp(0.3 + sim.rain * 1.1, 0, 1);        /* how much of the sky the cloud deck owns */
+  if (simLight > 0.45){ ctx.save(); ctx.globalCompositeOperation = 'multiply';   /* cloud shadows crawl the field: two decks, high and low */
+    ctx.fillStyle = 'rgba(64,66,60,' + (0.1 * cover * simLight) + ')'; ctx.fillRect(0, 0, VW, VH);
+    for (let i = 0; i < 8; i++){ const low = i >= 4, rad = low ? 175 + (i - 4) * 36 : 380 + i * 46;
+      const cxp = ((perfT * ((low ? 8.5 : 3.6) + i * 0.9) + i * 733) % (VW + rad * 2.4)) - rad * 1.2;
+      const cyp = VH * (0.14 + (i % 4) * 0.22) + Math.sin(perfT * 0.04 + i * 2.1) * 30;
+      const cg = ctx.createRadialGradient(cxp, cyp, 8, cxp, cyp, rad);
+      cg.addColorStop(0, 'rgba(66,68,62,' + ((low ? 0.15 : 0.1) * simLight * (0.55 + cover * 0.75)) + ')'); cg.addColorStop(1, 'rgba(66,68,62,0)');
+      ctx.fillStyle = cg; ctx.beginPath(); ctx.ellipse(cxp, cyp, rad, rad * 0.52, 0, 0, 6.29); ctx.fill(); }
+    ctx.restore(); }
+  else if (moonLight > 0.04){ ctx.save(); ctx.globalCompositeOperation = 'multiply';   /* by moonlight their shadows crawl silver-dark */
+    for (let i = 0; i < 5; i++){ const rad = 200 + i * 52;
+      const cxp = ((perfT * (5 + i * 1.1) + i * 733) % (VW + rad * 2.4)) - rad * 1.2;
+      const cyp = VH * (0.16 + (i % 3) * 0.26) + Math.sin(perfT * 0.04 + i * 2.1) * 30;
+      const cg = ctx.createRadialGradient(cxp, cyp, 8, cxp, cyp, rad);
+      cg.addColorStop(0, 'rgba(16,20,32,' + (moonLight * 0.55) + ')'); cg.addColorStop(1, 'rgba(16,20,32,0)');
+      ctx.fillStyle = cg; ctx.beginPath(); ctx.ellipse(cxp, cyp, rad, rad * 0.52, 0, 0, 6.29); ctx.fill(); }
     ctx.restore(); }
   const fogA = (sim.hour > 4.4 && sim.hour < 8.6) ? 0.13 * Math.min(1, 0.35 + sim.water / 9) : 0;   /* morning fog off wet ground */
   if (fogA > 0.01){ ctx.save();
@@ -3002,7 +3087,7 @@ function newSim(planetName, seedStr){
     jobs: [], jobT: 0, projT: 25, project: null, sapDone: false, sapPost: null, avgDamage: 0,
     directorT: 14, shake: 0, df: 0, speedK: 1, dawnDone: false, pendingRookie: 0, rookieGreeter: 0,
     stars: Array.from({ length: 120 }, () => ({ x: rng(), y: rng() * 0.55, r: rr(0.8, 1.9), b: rr(0.4, 1) })),
-    ledger: [], intel: [{ dmg: 0, ammo: 8, t: 0 }, { dmg: 0, ammo: 8, t: 0 }, { dmg: 0, ammo: 8, t: 0 }], intelWire: { down: false, t: 0 }, inflight: [], radioRetry: [], repT: 25, wireCut: null, order: null, pendingAssign: null, queue: [], freshScars: {}, works: null, worksCycle: 0, searchlights: [], cat: { fx: 44.5, fy: 36.4, z: 0, mode: 'sit', t: 3, tx: 44.5, ty: 36.4, faceA: 0 },
+    ledger: [], intel: [{ dmg: 0, ammo: 8, t: 0 }, { dmg: 0, ammo: 8, t: 0 }, { dmg: 0, ammo: 8, t: 0 }], intelWire: { down: false, t: 0 }, inflight: [], radioRetry: [], repT: 25, wireCut: null, order: null, pendingAssign: null, queue: [], freshScars: {}, works: null, worksCycle: 0, searchlights: [], moonOff: hash2(hashStr(seedStr + '|' + planetName), 5.1) * 29.5, cat: { fx: 44.5, fy: 36.4, z: 0, mode: 'sit', t: 3, tx: 44.5, ty: 36.4, faceA: 0 },
     bunkTaken: new Set(), bedTaken: new Set(), bearerJobs: [], spotted: null,
     missionQ: [], emMissionQ: [], dramaT: rr(26, 44), orderT: rr(50, 90), logisticsT: 4, batteryT: 2, talkT: 6,
     cart: { active: false, fx: -6, dir: 1, t: rr(24, 44) },
