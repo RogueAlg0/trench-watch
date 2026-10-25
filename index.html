@@ -25,7 +25,7 @@
     font-size:12px; letter-spacing:.15em; cursor:pointer; }
   #dice:hover { color:#d8d2c4; }
 #weekly{ position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(8,6,4,.55); z-index:40; padding:14px; }
-#weekly .sheet{ position:relative; background:#d9cfb6; color:#2b2119; max-width:640px; width:100%; max-height:88vh; overflow:auto;
+#weekly .sheet{ position:relative; background:#d9cfb6; color:#2b2119; max-width:640px; width:100%; max-height:88vh; max-height:calc(100dvh - 28px); overflow:auto;
   padding:26px 30px 22px; font-family:Georgia,'Times New Roman',serif; box-shadow:0 18px 60px rgba(0,0,0,.6); border:1px solid #a99a78; }
 #weekly .mast{ text-align:center; font-size:30px; letter-spacing:3px; font-weight:bold; border-bottom:3px double #2b2119; padding-bottom:8px; }
 #weekly .dateline{ text-align:center; font-size:11px; letter-spacing:2px; text-transform:uppercase; border-bottom:1px solid #2b2119; padding:5px 0 8px; }
@@ -35,7 +35,11 @@
 #weekly h3{ font-size:11px; letter-spacing:2px; text-transform:uppercase; margin:10px 0 4px; border-bottom:1px solid #8a7a5c; padding-bottom:2px; }
 #weekly p{ margin:0 0 6px; } #weekly .foot{ border-top:1px solid #2b2119; margin-top:12px; padding-top:6px; font-size:10.5px; text-align:center; font-style:italic; }
 #weekly .wclose{ position:absolute; top:6px; right:12px; background:none; border:none; font-size:22px; color:#2b2119; cursor:pointer; font-family:Georgia,serif; }
-@media (max-width:560px){ #weekly .cols{ columns:1; } #weekly .mast{ font-size:22px; } }
+@media (max-width:560px){ #weekly .cols{ columns:1; } #weekly .mast{ font-size:22px; }
+  #weekly .sheet{ padding-top:48px; }
+  #weekly .wclose{ position:fixed; top:calc(env(safe-area-inset-top, 0px) + 10px); left:12px; right:auto; width:42px; height:42px; border-radius:50%;
+    background:#d9cfb6; border:1px solid #8a7a5c; box-shadow:0 3px 10px rgba(0,0,0,.45); font-size:24px; line-height:1; z-index:80;
+    display:flex; align-items:center; justify-content:center; padding:0; } }
 #sndBtn{ position:fixed; top:10px; right:10px; width:38px; height:38px; border-radius:50%; z-index:45; display:none;
   background:rgba(18,14,10,.55); border:1px solid rgba(232,223,200,.4); cursor:pointer; align-items:center; justify-content:center; padding:0; }
 #sndBtn.off{ opacity:.45 } #sndBtn.off .wv{ display:none } #sndBtn.off .sl{ display:block !important; }
