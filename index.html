@@ -542,6 +542,7 @@ function makeSoldier(role, postTile){
     vig: null, duty: null, dead: false, arriveAct: null, shootAt: 0, fired: false, fumbled: false,
     job: null, supplyJob: null, gun: -1, gunSlot: 0, pairId: -1, sector: -1, kneel: false,
     rest: rr(0.5, 1), food: rr(0.5, 1), morale: rr(0.5, 0.9), shunned: 0, grudge: -1, assigner: -1,
+    supp: 0, suppAt: -9, fat: 0, broke: false, rallied: 0, rushPh: 0, rushT: rr(2, 4), holdT: 0,
     knock: null, stepAcc: 0, lastTile: '', queueSlot: -1, orderFx: 0, squad: -1, squadMark: 0, bond: null, bias: null };
 }
 function setState(s, st, dur){ s.state = st; s.tState = dur; s.stateAge = 0; }
@@ -570,6 +571,9 @@ function soldierMove(s, dt){
     s.phase += dt * 5;
     if (c.t <= 0){ s.z = c.z1; s.climbing = null; }
     return; }
+  if (s.holdT > 0){ s.holdT -= dt; s.vx = 0; s.vy = 0;
+    const tzh = (tileAt(Math.floor(s.fx), Math.floor(s.fy)) || { z: s.z }).z;
+    s.z += (tzh - s.z) * Math.min(1, dt * 7); return; }
   if (s.proneT > 0 && s.path) s.proneT = 0;                              // ordered to move: up and go
   if (!s.path || s.pathI >= s.path.length){
     const tz = (tileAt(Math.floor(s.fx), Math.floor(s.fy)) || { z: 0 }).z + (s.onStep ? 0.55 : 0);
@@ -589,6 +593,7 @@ function soldierMove(s, dt){
   if (tileHere && tileHere.rubble > 0.3) sp *= 0.55;                       // rubble is slow going
   if (tileHere && tileHere.boards && sim.water > 2.5) sp *= 1.18;          // boards beat mud
   if (s.stance === 'crouch') sp *= 0.72;                                   // a crouch is careful, not quick
+  if ((s.fat || 0) > 0.85) sp *= 0.62;                                      // winded: the legs go first
   const tKey = Math.floor(s.fx) + ',' + Math.floor(s.fy);                  // feet wear the ground dark
   if (s.lastTile !== tKey){ s.lastTile = tKey; if (tileHere) tileHere.worn = Math.min(1, tileHere.worn + 0.045); }
   /* the passing drill: trenches are one man wide and both of you know it.
@@ -1949,6 +1954,7 @@ function think(s){
   const idle = (min, max) => setState(s, 'idle', rr(min || 0.6, max || 1.6));
   const go = (gx, gy, opts) => { if (!goTo(s, gx, gy, opts || {})) idle(); };
   if (s.enemy) return;
+  if (s.broke || (s.supp > 0.65 && !s.foe)){ if (!s.path) s.vig = { pose: 'sit', t: rr(1.5, 3) }; return; }   // pinned or broken: no new errands until it lifts
   if (s.supplyJob || s.bearerJob){ idle(0.4, 0.8); return; }            // the machines in updateSoldier drive these
   /* ---- needs before duties ---- */
   if (s.rest < 0.22 && !standTo && !sim.raid.active){
@@ -2198,6 +2204,7 @@ function burst(bx, by){
       if (tt && tt.z >= 0 && !s.path) s.proneT = Math.max(s.proneT || 0, rr(2.5, 4.5));
       else s.duck = Math.max(s.duck, rr(0.7, 1.4)); }
     if (d < 4.5 && s.state !== 'down') s.nerves = Math.max(0, (s.nerves ?? 0.8) - (4.5 - d) * 0.006); });
+  suppAll(bx, by, 0.5, 3.6);
 }
 function dropJob(s){ if (s.job){ s.job = null; } }
 function faceToward(s, x, y){ const a = Math.atan2(y - s.fy, x - s.fx);
@@ -2290,6 +2297,11 @@ function killSoldier(s, cause){
   startRag(s, -Math.cos(s.faceA) * rr(0.8, 1.5), -Math.sin(s.faceA) * rr(0.8, 1.5), rr(-5, 5));
   s.dead = true; s.state = 'down'; s.path = null; s.vig = null; s.foe = null; s.sawJob = undefined; s.sawReady = false; s.wreckJob = false; s.gatherId = undefined;
   sim.soldiers.forEach(o => { if (!o.dead && !o.enemy && o !== s && (o.friend === s.id || (o.bond && o.bond[s.id] > 0.3))) o.grief = Math.min(1, (o.grief || 0) + 0.5); });
+  if (!s.enemy){ sim.soldiers.forEach(o => { if (!o.dead && !o.enemy && o !== s && (o.friend === s.id || (o.bond && o.bond[s.id] > 0.3))) o.morale = Math.max(0, (o.morale ?? 0.7) - 0.05); });
+    if (s.trade === 'sergeant'){ const ci = sectorOfX(s.fx); sim.confuse[ci] = 15;
+      sim.soldiers.forEach(o => { if (!o.dead && !o.enemy && sectorOfX(o.fx) === ci) o.jumpy = Math.max(o.jumpy || 0, 300); });
+      logEvent('order', 'A sergeant is down in sector ' + 'ABC'[ci] + '; orders fumble while another takes over.'); }
+    if (s.trade === 'officer') sim.confuse = [15, 15, 15]; }
   sim.corpses.push(s);
   sim.soldiers.forEach(o => { if (o.friend === s.id && !o.dead) o.grief = 1; });
   if (s.squad >= 0) sim.soldiers.forEach(o => { if (o.squad === s.squad && !o.dead) o.grief = Math.min(1, Math.max(o.grief, 0.55)); });
@@ -2329,6 +2341,7 @@ function updateEvents(dt){
       r.enemy = true; r.crouch = true; r.speed = rr(0.5, 0.66);
       sim.soldiers.push(r);
       const tg = clamp(cx + ri(-4, 6), 6, 86); goTo(r, tg, trenchY(tg), { enemy: true, scramble: true, state: 'walk' }); }
+    sim.raid.cx = cx; sim.contact[sectorOfX(cx)] = Math.min(1, sim.contact[sectorOfX(cx)] + 0.5);
     recordSeen('raid', 0, cx, 14, 26);
     logEvent('raid', 'A raid comes over the wire in the dark.');
     [-6, 0, 6].forEach(off2 => sim.parts.push({ kind: 'ring', fx: clamp(cx + off2, 6, 86), fy: trenchY(clamp(cx + off2, 6, 86)), z: -1, ox: 0, oy: 0, h: 20, vx: 0, vy: 0, vh: 0, life: 1.3, t: 0, col: '#e8dcc0', r: 3 }));
@@ -2528,6 +2541,103 @@ function updateClimate(dt){
   sim.speedK = clamp(0.88 + sim.crates * 0.03 - (sim.temp < 0 ? 0.07 : 0), 0.8, 1.12);
   WarAudio.setWeather(sim.rain, Math.sin(sim.t * 0.045));
 }
+
+function sectorOfX(x){ return x < 33 ? 0 : x < 61 ? 1 : 2; }
+function suppCover(tt){ return tt ? (trenchLike(tt.t) ? 0.65 : tt.t === 'crater' ? 0.8 : (tt.t === 'dug' || tt.t === 'floor') ? 0.6 : 1) : 1; }
+function suppNear(x, y, targetEnemy, amt){   /* near misses: only the side being shot at feels them */
+  sim.soldiers.forEach(m => { if (m.dead || m.state === 'down' || m.gone) return;
+    if (targetEnemy && !m.enemy) return; if (!targetEnemy && m.enemy) return;
+    const d = Math.hypot(m.fx - x, m.fy - y); if (d > 2.5) return;
+    const tt = tileAt(Math.floor(m.fx), Math.floor(m.fy));
+    m.supp = Math.min(1, (m.supp || 0) + amt * (1 - d / 3.2) * suppCover(tt) * (1.25 - (m.nerves ?? 0.8) * 0.5)); m.suppAt = sim.t; }); }
+function suppAll(x, y, amt, r){              /* a shell suppresses everyone near it, either side */
+  sim.soldiers.forEach(m => { if (m.dead || m.state === 'down' || m.gone) return;
+    const d = Math.hypot(m.fx - x, m.fy - y); if (d > r) return;
+    const tt = tileAt(Math.floor(m.fx), Math.floor(m.fy));
+    m.supp = Math.min(1, (m.supp || 0) + amt * (1 - d / (r + 1)) * suppCover(tt)); m.suppAt = sim.t; }); }
+function enemyShotAt(tgt, hitP){
+  const gx = tgt.fx + rr(-3, 3), gy = enemyY(Math.floor(tgt.fx));
+  const ghost = { fx: gx, fy: gy + 0.5, z: -1, faceA: Math.PI / 2 };
+  const land = { fx: tgt.fx + rr(-1.2, 1.2), fy: tgt.fy + rr(-0.8, 0.8), z: tgt.z };
+  fireTracer(ghost, land); WarAudio.rifle(gx, gy);
+  suppNear(land.fx, land.fy, false, 0.22);
+  const tt = tileAt(Math.floor(tgt.fx), Math.floor(tgt.fy));
+  const exposed = !(tt && (trenchLike(tt.t) || tt.t === 'dug' || tt.t === 'floor'));
+  if (rng() < hitP * (exposed ? 2.2 : 1)) wound(tgt, 'rifle fire'); }
+function flareTick(dt){
+  for (let i = 0; i < 3; i++){ const F = sim.flare[i], sec = sim.map.sectors[i];
+    sim.contact[i] *= Math.pow(0.5, dt / 90);                       /* a contact is forgotten after about ninety seconds */
+    F.t -= dt;
+    const front = sim.soldiers.filter(m => !m.dead && !m.enemy && m.fx >= sec.x0 && m.fx <= sec.x1 &&
+      Math.abs(m.fy - trenchY(Math.floor(m.fx))) <= 1.6 && m.state !== 'down');
+    if (F.mode === 'quiet'){ F.next -= dt;
+      if (F.next <= 0){ F.next = rr(9, 20) / (0.5 + sim.intensity);
+        if (front.length) enemyShotAt(pick(front), 0.02); }
+      if (F.t <= 0){ F.t = rr(3, 6);
+        const up = front.filter(m => (m.supp || 0) < 0.35).length, share = front.length ? up / front.length : 0;
+        const raidHere = sim.raid.active && sectorOfX(sim.raid.cx || 46) === i;
+        if ((share > 0.62 && sim.contact[i] > 0.25 && rng() < 0.5) || raidHere || rng() < 0.006){
+          F.mode = 'flare'; F.t = rr(9, 15); F.next = 0; sim.contact[i] = Math.min(1, sim.contact[i] + 0.4);
+          logEvent('flare', 'Sector ' + sec.id + ' opens up: the far line flares.'); } } }
+    else { F.next -= dt;
+      if (F.next <= 0){ F.next = rr(0.3, 0.7); if (front.length){ const k = ri(2, 4); for (let q = 0; q < k; q++) enemyShotAt(pick(front), 0.006); } }
+      if (F.t <= 0){ F.mode = 'quiet'; F.t = rr(60, 120); F.next = rr(4, 9); sim.contact[i] *= 0.5; } } } }
+function leaderTick(dt){
+  sim.leaderT = (sim.leaderT ?? 0) - dt; sim.officerT = (sim.officerT ?? 0) - dt;
+  sim.confuse = sim.confuse.map(c => Math.max(0, c - dt));
+  if (sim.leaderT <= 0){ sim.leaderT = 2;
+    const leaders = sim.soldiers.filter(o => !o.dead && !o.enemy && (o.trade === 'sergeant' || o.trade === 'officer') && o.state !== 'down');
+    sim.soldiers.forEach(m => { if (m.dead || m.enemy) return;
+      m.rallied = leaders.some(L => Math.hypot(L.fx - m.fx, L.fy - m.fy) < 7) ? 2.5 : (m.rallied || 0); });
+    leaders.filter(L => L.trade === 'sergeant').forEach(L => { if (L.path || L.job || L.supplyJob || L.talk || L.gatherId || L.state === 'watch') return;
+      let worst = null, ws = 0.6;
+      sim.soldiers.forEach(m => { if (m.dead || m.enemy || m === L || m.state === 'down') return;
+        if (sectorOfX(m.fx) !== sectorOfX(L.fx)) return;
+        const score = (m.supp || 0) + (m.broke ? 0.5 : 0); if (score > ws){ ws = score; worst = m; } });
+      if (worst) goTo(L, Math.floor(worst.fx), Math.floor(worst.fy), { state: 'walk' }); }); }
+  if (sim.officerT <= 0){ sim.officerT = 10;
+    const off = sim.soldiers.find(o => !o.dead && !o.enemy && o.trade === 'officer' && o.state !== 'down');
+    if (off && !off.path && !off.job && !off.talk && off.state !== 'watch'){
+      let bs = -1, bc = 1;
+      sim.map.sectors.forEach((sec, i) => { const c = sim.soldiers.filter(m => !m.dead && !m.enemy && sectorOfX(m.fx) === i && (m.broke || (m.supp || 0) > 0.65)).length;
+        if (c > bc){ bc = c; bs = i; } });
+      if (bs >= 0) goTo(off, sim.map.sectors[bs].comm, supportY(sim.map.sectors[bs].comm), { state: 'walk' }); } } }
+function feelTick(s, dt){
+  if (s.dead || s.gone) return;
+  const tt = tileAt(Math.floor(s.fx), Math.floor(s.fy));
+  const inCover = tt && (trenchLike(tt.t) || tt.t === 'crater');
+  if ((s.supp || 0) > 0 && sim.t - (s.suppAt || -9) > 1) s.supp = Math.max(0, s.supp - 0.045 * dt * (inCover ? 1.5 : 1));
+  if (s.state !== 'down'){
+    if (s.supp > 0.65 && tt && tt.z >= 0 && !trenchLike(tt.t) && !s.path) s.proneT = Math.max(s.proneT || 0, 0.5);
+    else if (s.supp > 0.35) s.duck = Math.max(s.duck || 0, 0.55);
+    const moving = !!s.path;
+    if (s.state === 'run' || (s.enemy && s.raid && s.rushPh === 0 && moving)) s.fat = Math.min(1, (s.fat || 0) + 0.03 * dt);
+    else if (s.state === 'carry' || s.state === 'drag') s.fat = Math.min(1, (s.fat || 0) + 0.012 * dt);
+    else if (!moving) s.fat = Math.max(0, (s.fat || 0) - 0.01 * dt);
+    else s.fat = Math.max(0, (s.fat || 0) - 0.004 * dt);
+    let dm = 0;
+    if (s.supp > 0.15) dm -= 0.002 * dt * (0.5 + s.supp);
+    else if ((s.supp || 0) < 0.1 && !s.enemy){ dm += 0.0015 * dt;
+      if ((s.rallied || 0) > 0){ s.rallied -= dt; dm += 0.012 * dt; } }
+    if (dm) s.morale = clamp((s.morale ?? 0.7) + dm, 0, 1);
+    if (!s.enemy){
+      if (!s.broke && s.morale < 0.14 && s.state !== 'down'){ s.broke = true; dropJob(s); s.path = null; s.vig = null;
+        const sec = sim.map.sectors[clamp(s.sector, 0, 2)] || sim.map.sectors[1];
+        const bx = clamp(Math.floor(s.fx), sec.dug[0], sec.dug[1]);
+        if (!goTo(s, bx, 24, { state: 'walk' })) goTo(s, s.hx, s.hy, { act: 'post' });
+        logEvent('break', describeMan(s) + ' has had enough for now; he goes to ground.'); }
+      if (s.broke){
+        if (s.morale > 0.3){ s.broke = false; logEvent('good', describeMan(s) + ' comes back to himself and returns to his post.');
+          if (!s.path) goTo(s, s.hx, s.hy, { act: 'post' }); }
+        else if (!s.path && !s.vig && s.state !== 'down') s.vig = { pose: 'sit', t: rr(1.5, 3) }; } } }
+  if (s.enemy && s.raid && s.state !== 'down'){
+    const tt2 = tileAt(Math.floor(s.fx), Math.floor(s.fy));
+    const open = tt2 && tt2.z >= 0 && !trenchLike(tt2.t) && s.fy < 18.5;
+    if (open && s.path && (s.fat || 0) < 0.85){
+      if (s.rushPh === 0){ s.rushT = (s.rushT ?? rr(2, 4)) - dt;
+        if (s.rushT <= 0){ s.holdT = s.supp > 0.65 ? rr(2.5, 4) : rr(1.3, 2.3); s.rushPh = 1; s.proneT = Math.max(s.proneT || 0, s.holdT); } } }
+    else if (s.rushPh === 1 && (s.holdT || 0) <= 0){ s.rushPh = 0; s.rushT = rr(3.2, 4.4); } } }
+
 function updateSoldier(s, dt){
   if (s.gone) return;
   s.stateAge += dt;
@@ -2797,6 +2907,7 @@ function updateSoldier(s, dt){
     else faceToward(s, s.fx + Math.sin(sim.t * 0.23 + s.id), s.fy + (s.enemy ? 8 : -8));
     s.rifle = s.rifle || { foul: rr(0.05, 0.4) };
     const cyc = s.cyc || (s.cyc = { stage: 'aim', t: rr(0.5, 1.6) });
+    if (s.supp > 0.35 && !foe) cyc.t = Math.max(cyc.t, 0.9);             // heads down: the aim never resolves while suppressed
     cyc.t -= dt;
     if (cyc.stage === 'aim'){ s.vig = { pose: 'aim', t: 0.18 };
       if (cyc.t <= 0){
@@ -2808,6 +2919,7 @@ function updateSoldier(s, dt){
           const tgt = foe ? foe : (s.enemy ? { fx: rr(6, 86), fy: trenchY(ri(6, 86)) + 0.4, z: -0.5 }
                                         : { fx: rr(6, 86), fy: enemyY(ri(6, 86)) + 0.5, z: -1 });
           if (foe || s.enemy || rng() < (sim.intensity > 0.5 ? 0.3 : 0.12)){
+          suppNear(tgt.fx, tgt.fy, !s.enemy, foe ? 0.08 : 0.1);
           if (s.weapon !== 'hand' && (['rifle', 'sent', 'sapper'].includes(s.trade) || s.enemy)){
             if (!(s.weaponT > 0)){ s.weaponTo = 'hand'; s.weaponT = rr(0.55, 0.8); } cyc.stage = 'aim'; cyc.t = 0.7; }
           else { fireTracer(s, tgt); s.kickT = 1; WarAudio.rifle(s.fx, s.fy); } }
@@ -3135,7 +3247,7 @@ function socialTick(dt){
           startGather(rng() < 0.45 ? 'cards' : 'talk', [Math.floor(a.fx), Math.floor(a.fy)], [a].concat(mates), rr(18, 36)); } } } } }
 function updateSystems(dt){
   enemyWorksTick(dt);
-  socialTick(dt);
+  socialTick(dt); leaderTick(dt); flareTick(dt);
   /* pacing: the war breathes. Stand-to hours are loud, midday is slow, night is tense and low. */
   sim.intensity ??= 0.3; sim.pulseT = Math.max(0, (sim.pulseT || 0) - dt);
   const hf = sim.hour;
@@ -3520,7 +3632,7 @@ function update(dt){
     if (sim.pendingRookie){ c.rookie = true; sim.rookieGreeter = sim.pendingRookie; sim.pendingRookie = 0; }
     sim.soldiers.push(c); goTo(c, 15, 41, { state: 'carry' }); setState(c, 'carry', 150); }
   updateGunFx(dt);
-  sim.soldiers.forEach(s => updateSoldier(s, dt));
+  sim.soldiers.forEach(s => { feelTick(s, dt); updateSoldier(s, dt); });
   sim.soldiers = sim.soldiers.filter(s => !s.gone);
   physicsStep(dt);
   updateParts(dt);
@@ -3995,6 +4107,8 @@ function newSim(planetName, seedStr){
     cart: { active: false, fx: -6, dir: 1, t: rr(24, 44), phase: 'gone', cargo: null, vCur: 0 },
     saw: { active: false, pair: [], t: 0, stroke: 0 },
     social: [], socialT: 5, rumDay: -1, mailT: 260,
+    flare: [0, 1, 2].map(() => ({ mode: 'quiet', t: rr(20, 45), next: rr(4, 18) })), contact: [0.2, 0.2, 0.2],
+    confuse: [0, 0, 0], leaderT: 0, officerT: 0,
     plane: { active: false, fx: -8, fy: 8 },
     drops: [], crates: [], hulks: [],
     stocks: { depot: { food: 14, ammo: 26, shells: 34, timber: 16, logs: 4, water: 20, oil: 6, med: 6, cable: 5 },
