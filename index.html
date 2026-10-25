@@ -1653,15 +1653,71 @@ function drawGun(g){
   const n = Math.min(8, Math.floor(g.ammo));                                               // the shell stack tells the stock
   for (let i = 0; i < n; i++) ctx.drawImage(gunSprite('shell', false), Math.round(sx + 34 + (i % 4) * 5), Math.round(sy - 8 - Math.floor(i / 4) * 8));
 }
+function drawHulk(hk){
+  const sx = isoX(hk.fx, 53.1), sy = isoY(hk.fx, 53.1, 0);
+  ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(sx, sy + 5, 34, 6, 0, 0, 6.29); ctx.fill();
+  ctx.drawImage(gunSprite('lorry', false), Math.round(sx - 40), Math.round(sy - 30));
+  ctx.fillStyle = 'rgba(10,8,5,.62)'; ctx.fillRect(Math.round(sx - 40), Math.round(sy - 30), 80, 34); }
+function drawSawPit(){
+  const bx = isoX(19.5, 46), by = isoY(19.5, 46, 0);
+  ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.ellipse(bx, by + 3, 30, 6, 0, 0, 6.29); ctx.fill();
+  ctx.strokeStyle = '#4c3a22'; ctx.lineWidth = 3;
+  [[-12, 0], [12, 0]].forEach(([ox]) => { ctx.beginPath(); ctx.moveTo(bx + ox - 5, by + 2); ctx.lineTo(bx + ox + 4, by - 8); ctx.moveTo(bx + ox + 5, by + 2); ctx.lineTo(bx + ox - 4, by - 8); ctx.stroke(); });
+  ctx.fillStyle = '#6d5136'; ctx.beginPath(); ctx.ellipse(bx, by - 9, 17, 4.6, 0, 0, 6.29); ctx.fill();
+  ctx.fillStyle = '#c9b18a'; ctx.beginPath(); ctx.ellipse(bx + 16, by - 9, 2.6, 4.4, 0, 0, 6.29); ctx.fill();
+  const logs = Math.min(6, Math.floor(sim.stocks.depot.logs || 0));
+  for (let i = 0; i < logs; i++){ const lx = isoX(21.8, 47.2) + (i % 3) * 9, ly = isoY(21.8, 47.2, 0) - Math.floor(i / 3) * 6;
+    ctx.fillStyle = '#5f4630'; ctx.beginPath(); ctx.ellipse(lx, ly, 8, 3.4, 0, 0, 6.29); ctx.fill();
+    ctx.fillStyle = '#c9b18a'; ctx.beginPath(); ctx.ellipse(lx + 7, ly, 1.8, 3.2, 0, 0, 6.29); ctx.fill(); }
+  const planks = Math.min(6, Math.floor((sim.stocks.depot.timber || 0) / 3));
+  for (let i = 0; i < planks; i++){ const px2 = isoX(17.2, 47.3), py2 = isoY(17.2, 47.3, 0) - i * 3;
+    ctx.fillStyle = i % 2 ? '#77643f' : '#83704a'; ctx.fillRect(px2 - 11, py2 - 2, 22, 3); }
+  if (sim.saw.active){ const crew = sim.saw.pair.map(id => sim.soldiers.find(x => x.id === id)).filter(Boolean);
+    if (crew.length === 2){ const ph = sim.saw.stroke || 0, off = Math.sin(ph * 6.283) * 6;
+      const ax = isoX(crew[0].fx, crew[0].fy), ay = isoY(crew[0].fx, crew[0].fy, crew[0].z) - 29,
+            cx2 = isoX(crew[1].fx, crew[1].fy), cy2 = isoY(crew[1].fx, crew[1].fy, crew[1].z) - 29;
+      const len = Math.max(1, Math.hypot(cx2 - ax, cy2 - ay)), ux = (cx2 - ax) / len, uy = (cy2 - ay) / len;
+      ctx.strokeStyle = 'rgba(198,202,206,.85)'; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(ax - ux * off - ux * 4, ay - uy * off - uy * 4); ctx.lineTo(cx2 - ux * off + ux * 4, cy2 - uy * off + uy * 4); ctx.stroke();
+      ctx.fillStyle = '#3a3f45'; ctx.fillRect(ax - ux * off - 2, ay - uy * off - 3, 4, 6); ctx.fillRect(cx2 - ux * off - 2, cy2 - uy * off - 3, 4, 6); } } }
+function drawCrate(cr){
+  const sx = isoX(cr.fx, cr.fy), sy = isoY(cr.fx, cr.fy, 0);
+  ctx.fillStyle = 'rgba(0,0,0,.28)'; ctx.beginPath(); ctx.ellipse(sx, sy + 2, 11, 3, 0, 0, 6.29); ctx.fill();
+  ctx.fillStyle = '#77643f'; ctx.fillRect(sx - 8, sy - 10, 16, 11);
+  ctx.strokeStyle = '#4c3a22'; ctx.lineWidth = 1.6; ctx.strokeRect(sx - 8, sy - 10, 16, 11);
+  ctx.beginPath(); ctx.moveTo(sx - 8, sy - 10); ctx.lineTo(sx + 8, sy + 1); ctx.moveTo(sx + 8, sy - 10); ctx.lineTo(sx - 8, sy + 1); ctx.stroke(); }
+function drawDrop(dr){
+  const gx2 = isoX(dr.fx, dr.fy), gy2 = isoY(dr.fx, dr.fy, 0), cy = gy2 - dr.h;
+  ctx.fillStyle = 'rgba(0,0,0,' + (0.05 + 0.15 * (1 - Math.max(0, dr.h) / 300)).toFixed(2) + ')';
+  ctx.beginPath(); ctx.ellipse(gx2, gy2 + 2, 12, 3.4, 0, 0, 6.29); ctx.fill();
+  ctx.fillStyle = '#77643f'; ctx.fillRect(gx2 - 7, cy - 8, 14, 10);
+  ctx.strokeStyle = 'rgba(230,224,205,.75)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(gx2 - 13, cy - 25); ctx.lineTo(gx2 - 5, cy - 8); ctx.moveTo(gx2 + 13, cy - 25); ctx.lineTo(gx2 + 5, cy - 8); ctx.moveTo(gx2, cy - 27); ctx.lineTo(gx2, cy - 8); ctx.stroke();
+  ctx.fillStyle = '#ddd6c4'; ctx.beginPath(); ctx.ellipse(gx2, cy - 26, 15, 6.5, 0, 0, 6.29); ctx.fill();
+  ctx.fillStyle = 'rgba(120,110,90,.5)'; ctx.beginPath(); ctx.ellipse(gx2, cy - 24.5, 15, 5, 0, 0, 3.14); ctx.fill(); }
+function drawPlaneShadow(){
+  const pl = sim.plane, sx = isoX(pl.fx, pl.fy), sy = isoY(pl.fx, pl.fy, 0);
+  ctx.fillStyle = 'rgba(10,10,8,.20)'; ctx.beginPath(); ctx.ellipse(sx, sy, 30, 7, 0.35, 0, 6.29); ctx.fill(); }
+function drawPlane(){
+  const pl = sim.plane, sx = isoX(pl.fx, pl.fy), sy = isoY(pl.fx, pl.fy, 0) - 175;
+  ctx.fillStyle = 'rgba(24,26,30,.88)';
+  ctx.beginPath(); ctx.ellipse(sx, sy, 26, 4.6, 0.35, 0, 6.29); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(sx - 4, sy - 2); ctx.lineTo(sx + 16, sy + 12); ctx.lineTo(sx + 22, sy + 10); ctx.lineTo(sx + 4, sy - 4); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(sx - 22, sy - 8); ctx.lineTo(sx - 27, sy - 1); ctx.lineTo(sx - 20, sy + 1); ctx.closePath(); ctx.fill(); }
 function drawCart(){
   const c = sim.cart; if (!c.active && c.fx < -8) return;
   const sx = isoX(c.fx, 50.5), sy = isoY(c.fx, 50.5, 0);
   ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(sx, sy + 5, 34, 6, 0, 0, 6.29); ctx.fill();
   const spr = gunSprite('lorry', false), wheel = gunSprite('wheel', false);
   ctx.drawImage(spr, Math.round(sx - 40), Math.round(sy - 30));
-  [[-24, 0], [20, 0]].forEach(([wx]) => { ctx.save(); ctx.translate(sx + wx, sy + 1); ctx.rotate(c.fx * 2.2);
+  if (c.phase === 'wreck'){ ctx.fillStyle = 'rgba(12,9,6,.52)'; ctx.fillRect(Math.round(sx - 40), Math.round(sy - 30), 80, 34);
+    ctx.fillStyle = 'rgba(255,120,40,.5)'; ctx.beginPath(); ctx.ellipse(sx + 6, sy - 12, 5 + Math.sin(perfT * 9) * 1.4, 3, 0, 0, 6.29); ctx.fill(); return; }
+  const spin = (c.vCur || 0) > 0.15 ? c.fx * 2.2 : 0.4;
+  [[-24, 0], [20, 0]].forEach(([wx]) => { ctx.save(); ctx.translate(sx + wx, sy + 1); ctx.rotate(spin);
     ctx.drawImage(wheel, -8, -8); ctx.restore(); });
-  if (c.active && rng() < 0.3) sim.parts.push({ kind:'steam', fx: c.fx + 0.8, fy: 50.5, z: 0.4, ox: 0, h: 22, vh: rr(8, 13), life: rr(.7, 1.2), t: 0, col:'120,118,112', r: rr(1.8, 3) });
+  if (c.phase === 'unload' && c.cargo){ const left = Object.values(c.cargo).reduce((a, b) => a + b, 0), boxes = Math.ceil(left / 5);
+    for (let i = 0; i < Math.min(4, boxes); i++){ ctx.fillStyle = i % 2 ? '#6d5c3e' : '#7d6a48'; ctx.fillRect(Math.round(sx - 16 + i * 9), Math.round(sy - 26 - (i > 1 ? 5 : 0)), 8, 6); } }
+  if (c.active && c.phase !== 'unload' && rng() < 0.3) sim.parts.push({ kind:'steam', fx: c.fx + 0.8, fy: 50.5, z: 0.4, ox: 0, h: 22, vh: rr(8, 13), life: rr(.7, 1.2), t: 0, col:'120,118,112', r: rr(1.8, 3) });
 }
 /* ================= Painterly props: baked pixels, the salvage design language =================
    Stamped alloy, a thruster-cowling stove, caged glow-cells, waxed canvas, brass.
@@ -1876,6 +1932,7 @@ function think(s){
   sim.__thinks = (sim.__thinks || 0) + 1;
   if (s.hx === undefined){ s.hx = Math.floor(s.fx); s.hy = Math.floor(s.fy); }
   const h = sim.hour, A = sim.map.anchors, sec = sim.map.sectors[clamp(s.sector, 0, 2)] || sim.map.sectors[1];
+  if (s.wreckJob || (s.sawJob !== undefined && s.sawJob !== null)) return;
   const night = h < 5.6 || h > 19.4;
   const standTo = ((h > 5.65 && h < 6.75) || (h > 18.7 && h < 19.7)) && sim.t >= (s.alertT || 0);
   const messWin = (h > 6.9 && h < 8.4) || (h > 11.9 && h < 13.1) || (h > 17.4 && h < 18.6);
@@ -1889,7 +1946,7 @@ function think(s){
       if (!sim.bunkTaken.has(k)){ sim.bunkTaken.add(k); s.bunkKey = k; go(b[0], b[1], { act:'bunk' }); return; } }
   }
   if (messWin && s.food < 0.8 && s.trade !== 'cook'){
-    if (!sim.queue.includes(s.id) && sim.queue.length < 12 && !s.job && !s.supplyJob && !s.carryCas && !s.followJob && !s.duty) sim.queue.push(s.id);
+    if (!sim.queue.includes(s.id) && sim.queue.length < 12 && !s.job && !s.supplyJob && !s.carryCas && !s.followJob && !s.duty && !s.wreckJob && (s.sawJob === undefined || s.sawJob === null)) sim.queue.push(s.id);
     const idx = sim.queue.indexOf(s.id);
     if (idx >= 0){ const qt = sim.map.queueTiles[Math.min(idx, sim.map.queueTiles.length - 1)];
       if (Math.hypot(s.fx - (qt[0] + 0.5), s.fy - (qt[1] + 0.5)) > 0.8) go(qt[0], qt[1], {}); else idle(0.8, 1.4);
@@ -2087,6 +2144,13 @@ function spawnShell(tx, ty, fromRear){
   sim.parts.push({ kind:'shell', fx: tx + rr(-3, -1), fy: ty + rr(2.5, 4), tx, ty, z: tz, p: 0, t: 0, dur: rr(0.75, 1.05) });
   if (fromRear){ sim.parts.push({ kind:'shell', fx: tx + rr(6, 9), fy: ty + rr(8, 11), tx, ty, z: tz, p: 0, t: 0, dur: rr(0.9, 1.15) }); }
 }
+function roadHitCheck(p){
+  const c = sim.cart; if (!c || !c.active || c.phase === 'wreck' || c.phase === 'gone') return;
+  const d = Math.hypot(p.tx - c.fx, p.ty - 50.5);
+  if (d < 1.7 && rng() < 0.6){ c.phase = 'wreck'; c.wreckT = rr(45, 85); c.party = null; c.partyT = 3; c.partyBan = []; c.partyWait = 0; c.cargo = {};
+    sim.soldiers.forEach(x => { if (x.supplyJob && x.supplyJob.from === 'lorry'){ x.supplyJob = null; x.carryCom = null; } });
+    logEvent('report', 'A shell catches the lorry on the road. It burns where it stops, and the road is shut.'); }
+  else if (d < 3.4 && rng() < 0.3) logEvent('report', 'A shell lands close by the lorry on the road.'); }
 function burst(bx, by){
   WarAudio.boom(bx, by);
   const cx = Math.floor(bx), cy = Math.floor(by);
@@ -2133,11 +2197,18 @@ function addTrace(gx, gy, tr){
 }
 function releaseBunk(s){ if (s.bunkKey){ sim.bunkTaken.delete(s.bunkKey); s.bunkKey = null; } }
 function releaseBed(s){ if (s.bedKey){ sim.bedTaken.delete(s.bedKey); s.bedKey = null; } }
+function freeHands(n, near){
+  return sim.soldiers.filter(s => !s.dead && !s.enemy && !s.leg && !s.gone && !s.path && !s.job && !s.supplyJob && !s.wreckJob && (s.sawJob === undefined || s.sawJob === null) && !s.talk && !s.carryCas && !s.followJob && !s.patrol && !sim.queue.includes(s.id) &&
+    s.state !== 'down' && s.state !== 'sleep' && s.state !== 'watch' && (s.trade === 'carrier' || s.trade === 'rifle' || s.trade === 'sapper'))
+    .sort((a, b) => ((b.trade === 'carrier' ? 1 : 0) - (a.trade === 'carrier' ? 1 : 0)) ||
+      (near ? Math.hypot(a.fx - near[0], a.fy - near[1]) - Math.hypot(b.fx - near[0], b.fy - near[1]) : 0)).slice(0, n); }
 function nodePos(node){
   const A = sim.map.anchors;
   if (node === 'depot') return A.depot; if (node === 'cook') return A.cook;
   if (node === 'aid') return A.aid; if (node === 'hq') return A.hq;
   if (node === 'battery') return [29, 44.6];
+  if (node === 'lorry') return [Math.max(2, Math.floor(sim.cart.fx) - 1), 49];
+  if (node && node.startsWith('crate')){ const cr = sim.crates[+node.slice(5)]; if (cr) return [Math.floor(cr.fx), Math.floor(cr.fy)]; }
   if (node && node.startsWith('sec')){ const sec = sim.map.sectors[+node.slice(3)]; return [sec.comm, supportY(sec.comm)]; }
   return A.depot;
 }
@@ -2145,6 +2216,8 @@ function stockOf(node){
   if (node === 'depot') return sim.stocks.depot; if (node === 'cook') return sim.stocks.cook;
   if (node === 'aid') return sim.stocks.aid; if (node === 'hq') return sim.stocks.hq;
   if (node === 'battery') return sim.stocks.battery;
+  if (node === 'lorry') return sim.cart.cargo || {};
+  if (node && node.startsWith('crate')){ const cr = sim.crates[+node.slice(5)]; return cr ? cr.stocks : sim.stocks.depot; }
   if (node && node.startsWith('sec')) return sim.stocks.sectors[+node.slice(3)];
   return sim.stocks.depot;
 }
@@ -2188,7 +2261,7 @@ function wound(s, cause){
   paintScar(Math.floor(s.fx), Math.floor(s.fy), 'stain');
   if (rng() < 0.42){ killSoldier(s, cause); return; }
   startRag(s, -Math.cos(s.faceA) * rr(0.5, 1.1), -Math.sin(s.faceA) * rr(0.5, 1.1), rr(-3.5, 3.5));
-  s.state = 'down'; setState(s, 'down', 9999); s.path = null; s.vig = null;
+  s.state = 'down'; setState(s, 'down', 9999); s.path = null; s.vig = null; s.sawJob = undefined; s.sawReady = false; s.wreckJob = false;
   s.bleedT = rr(90, 260); s.inBed = false; s.carriedBy = null; sim.woundedRef = s;
   recordSeen('wound', s.id, s.fx, s.fy, 8);
   logEvent('wound', describeMan(s) + ' is down (' + cause + ').');
@@ -2202,7 +2275,7 @@ function killSoldier(s, cause){
   const tt = tileAt(Math.floor(s.fx), Math.floor(s.fy)); if (tt) tt.stain = Math.min(1, tt.stain + 0.8);
   paintScar(Math.floor(s.fx), Math.floor(s.fy), 'stain');
   startRag(s, -Math.cos(s.faceA) * rr(0.8, 1.5), -Math.sin(s.faceA) * rr(0.8, 1.5), rr(-5, 5));
-  s.dead = true; s.state = 'down'; s.path = null; s.vig = null; s.foe = null;
+  s.dead = true; s.state = 'down'; s.path = null; s.vig = null; s.foe = null; s.sawJob = undefined; s.sawReady = false; s.wreckJob = false;
   sim.corpses.push(s);
   sim.soldiers.forEach(o => { if (o.friend === s.id && !o.dead) o.grief = 1; });
   if (s.squad >= 0) sim.soldiers.forEach(o => { if (o.squad === s.squad && !o.dead) o.grief = Math.min(1, Math.max(o.grief, 0.55)); });
@@ -2616,6 +2689,18 @@ function updateSoldier(s, dt){
         s.job = null; setState(s, 'idle', rr(0.4, 1.4)); } }
     return; }
   /* supply: the carrying machine, node to node */
+  if (s.sawJob !== undefined && s.sawJob !== null){
+    if (s.dead || s.state === 'down'){ s.sawJob = undefined; s.sawReady = false; }
+    else { const spot = s.sawJob === 0 ? [18.5, 46.5] : [20.5, 45.5];
+      if (Math.hypot(spot[0] - s.fx, spot[1] - s.fy) > 1.0){ s.sawReady = false; if (!s.path) goTo(s, Math.floor(spot[0]), Math.floor(spot[1]), {}); }
+      else { s.sawReady = true; s.faceA = s.sawJob === 0 ? 0 : Math.PI; s.vig = { pose: 'repair', t: 0.35 }; }
+      return; } }
+  if (s.wreckJob){ const wc = sim.cart;
+    if (s.dead || s.state === 'down' || !wc.active || wc.phase !== 'wreck') s.wreckJob = false;
+    else { const spot = [wc.fx + (s.id % 2 ? 1.3 : -1.3), 49.2];
+      if (Math.hypot(spot[0] - s.fx, spot[1] - s.fy) > 0.7){ if (!s.path) goTo(s, Math.floor(spot[0]), Math.floor(spot[1]), { state: 'run' }); }
+      else s.vig = { pose: 'repair', t: 0.35 };
+      return; } }
   if (s.supplyJob){ const j = s.supplyJob;
     if (j.phase === 'fetch'){ const [px, py] = nodePos(j.from);
       if (Math.hypot(px - s.fx, py - s.fy) > 1.35){ if (!s.path) goTo(s, px, py, {}); }
@@ -2737,7 +2822,7 @@ function updateParts(dt){
     if (p.kind === 'spark'){ p.ox += (p.vx || 0) * dt; p.oy += (p.vy || 0) * dt; p.h += (p.vh || 0) * dt; p.vh -= 300 * dt; if (p.h < 0){ p.h = 0; p.vh *= -0.4; } }
     if (p.kind === 'shell'){ p.p += dt / p.dur;
       if (!p.whistled && p.p > 0.5){ p.whistled = true; WarAudio.whistle(p.tx, p.ty, p.dur * (1 - p.p)); }
-      if (p.p >= 1){ p.p = 1; p.t = 999; burst(p.tx, p.ty); } continue; }
+      if (p.p >= 1){ p.p = 1; p.t = 999; burst(p.tx, p.ty); if (p.road) roadHitCheck(p); } continue; }
     if (p.kind === 'dirt'){ p.ox += p.vx * dt; p.oy += p.vy * dt; p.h += p.vh * dt; p.vh -= 340 * dt; if (p.h < 0) p.h = 0; }
     if (p.kind === 'steam'){ p.ox = (p.ox || 0) + p.vx * dt * 0.2; p.h = (p.h || 8) + (p.vh || 12) * dt; }
     if (p.kind === 'flare'){ p.h -= dt * 3.4; p.fx += dt * (0.1 + (sim.windX || 0) * 0.012); if (p.h < 26) p.life = Math.min(p.life, 0.6);
@@ -3073,7 +3158,7 @@ function updateSystems(dt){
       for (const n of needs){ if (sim.soldiers.filter(s => s.supplyJob).length >= 5) break;
         if ((sim.stocks.depot[n.com] || 0) < 1) continue;
         if (sim.soldiers.some(s => s.supplyJob && s.supplyJob.to === n.to && s.supplyJob.com === n.com)) continue;
-        const free = sim.soldiers.filter(s => !s.dead && !s.enemy && !s.path && !s.job && !s.supplyJob && !s.talk && !s.carryCas && !s.followJob && !s.patrol && !sim.queue.includes(s.id) &&
+        const free = sim.soldiers.filter(s => !s.dead && !s.enemy && !s.leg && !s.gone && !s.path && !s.job && !s.supplyJob && !s.wreckJob && (s.sawJob === undefined || s.sawJob === null) && !s.talk && !s.carryCas && !s.followJob && !s.patrol && !sim.queue.includes(s.id) &&
           s.state !== 'down' && s.state !== 'sleep' && s.state !== 'watch' && (s.trade === 'carrier' || s.trade === 'rifle' || s.trade === 'sapper'))
           .sort((a, b) => (b.trade === 'carrier' ? 1 : 0) - (a.trade === 'carrier' ? 1 : 0))[0];
         if (free){ free.supplyJob = { com: n.com, qty: n.qty, from: 'depot', to: n.to, phase: 'fetch' }; setState(free, 'idle', 0.2); } } } }
@@ -3126,30 +3211,102 @@ function updateSystems(dt){
   sim.egunT = (sim.egunT ?? 14) - dt;
   if (sim.egunT <= 0){ sim.egunT = rr(10, 22) / (0.4 + sim.intensity);
     const eg = pick(sim.eguns.filter(g => g.ammo > 0));
-    if (eg){ const rear = rng() < 0.22, tx = rr(8, 84), ty = rear ? rr(28, 44) : trenchY(Math.floor(tx)) + rr(-1, 1.4);
+    if (eg){ const lorryUp = sim.cart.active && sim.cart.phase !== 'wreck' && sim.cart.phase !== 'gone';
+      const roadShot = lorryUp && rng() < 0.34, rear = !roadShot && rng() < 0.22;
+      const tx = roadShot ? sim.cart.fx + rr(-4, 4) : rr(8, 84), ty = roadShot ? 50.5 + rr(-0.5, 0.5) : rear ? rr(28, 44) : trenchY(Math.floor(tx)) + rr(-1, 1.4);
       const d = Math.hypot(tx - eg.fx, ty - eg.fy);
-      sim.parts.push({ kind: 'shell', fx: eg.fx, fy: eg.fy + 1, tx: tx + rr(-2.4, 2.4), ty: ty + rr(-1.4, 1.4), z: -1, p: 0, t: 0, dur: clamp(d * 0.055, 1.6, 4.4) });
+      sim.parts.push({ kind: 'shell', fx: eg.fx, fy: eg.fy + 1, tx: tx + rr(-2.4, 2.4), ty: ty + rr(-1.4, 1.4), z: -1, p: 0, t: 0, dur: clamp(d * 0.055, 1.6, 4.4), road: roadShot });
       eg.ammo--; fireGun(eg); } }
   /* the far war, never seen: a rumble now and then, beyond the wire */
   sim.windX = Math.sin(sim.t * 0.045) * 6 + Math.sin(sim.t * 0.13) * 2;
   sim.boomT = (sim.boomT ?? 9) - dt;
   if (sim.boomT <= 0){ sim.boomT = rr(7, 19); WarAudio.distant(); }
-  /* the road cart: the depot eats from the road */
+  /* the road lorry: the depot eats from the road, one box at a time (4.7) */
   const cart = sim.cart;
   sim.cartT = (sim.cartT ?? 60) - dt;
-  if (!cart.active && sim.cartT <= 0){ cart.active = true; cart.fx = -6; cart.phase = 'in'; sim.cartT = rr(170, 300); }
+  if (!cart.active && sim.cartT <= 0){ cart.active = true; cart.fx = -6; cart.phase = 'in'; cart.vCur = 0;
+    cart.cargo = { food: 6, ammo: 8, shells: 6, logs: 5, water: 6, med: 2, cable: 2, oil: 2 };
+    sim.cartT = rr(170, 300); }
   if (cart.active){
-    if (cart.phase === 'unload'){ cart.t -= dt;
-      if (cart.t <= 0){ const D = sim.stocks.depot;
-        D.food += 6; D.ammo += 8; D.shells += 6; D.timber += 5; D.water += 6; D.med += 2; D.cable += 2; D.oil += 2;
-        cart.phase = 'out'; logEvent('supply', 'A cart reaches the depot and is unloaded.'); } }
-    else { const spd = cart.phase === 'out' ? 3.4 : 2.6;
-      cart.fx += spd * dt; cart.traceT = (cart.traceT || 0) - dt;
+    if (cart.phase === 'unload'){
+      sim.unloadT = (sim.unloadT ?? 0) - dt;
+      if (sim.unloadT <= 0){ sim.unloadT = 1.2;
+        const busy = sim.soldiers.filter(x => x.supplyJob && x.supplyJob.from === 'lorry').length;
+        if (busy < 4){ for (const com of ['shells', 'ammo', 'logs', 'food', 'water', 'med', 'cable', 'oil']){
+          if ((cart.cargo[com] || 0) > 0){ const free = freeHands(8, [14, 49]).filter(h => h.fy > 30)[0] || freeHands(1, [14, 49])[0];
+            if (free){ free.supplyJob = { com, qty: com === 'logs' ? 1 : 2, from: 'lorry', to: 'depot', phase: 'fetch' }; setState(free, 'idle', 0.2); } break; } } } }
+      const left = Object.values(cart.cargo).reduce((a, b) => a + b, 0);
+      if (left <= 0 && !sim.soldiers.some(x => x.supplyJob && x.supplyJob.from === 'lorry')){
+        cart.phase = 'out'; logEvent('supply', 'A lorry reaches the depot and is unloaded by hand.'); } }
+    else if (cart.phase === 'wreck'){
+      if (!cart.party){ cart.partyT = (cart.partyT ?? 4) - dt;
+        if (cart.partyT <= 0){ const hands = freeHands(4, [cart.fx, 49.2]).filter(h => !(cart.partyBan || []).includes(h.id)).slice(0, 2);
+          if (hands.length >= 2){ hands.forEach(h => h.wreckJob = true); cart.party = hands.map(h => h.id); } } }
+      else { const crew = cart.party.map(id => sim.soldiers.find(x => x.id === id)).filter(x => x && !x.dead && x.state !== 'down');
+        if (crew.length < 2){ crew.forEach(h => h.wreckJob = false); cart.party = null; cart.partyT = 4; }
+        else if (!crew.every(h => Math.hypot(h.fx - cart.fx, h.fy - 49.2) < 2.4)){ cart.partyWait = (cart.partyWait || 0) + dt;
+          if (cart.partyWait > 60){ cart.partyBan = (cart.partyBan || []).concat(cart.party); crew.forEach(h => h.wreckJob = false);
+            cart.party = null; cart.partyT = 3; cart.partyWait = 0; } }
+        else if (crew.every(h => Math.hypot(h.fx - cart.fx, h.fy - 49.2) < 2.4)){ cart.partyWait = 0; cart.wreckT -= dt;
+          if (rng() < dt * 2) puff(cart.fx + rr(-1, 1), 49.6, 0, 6, { tint: 'dark', r: rr(5, 9), a: 0.3 });
+          if (cart.wreckT <= 0){ sim.hulks.push({ fx: cart.fx }); cart.active = false; cart.phase = 'gone';
+            crew.forEach(h => h.wreckJob = false); cart.party = null;
+            logEvent('report', 'The wreck is dragged clear of the road. The way is open again.'); } } }
+      if (rng() < dt * 1.4) puff(cart.fx + rr(-0.8, 0.8), 50.5, 0, 14, { tint: 'dark', r: rr(6, 11), a: 0.4 }); }
+    else { const top = cart.phase === 'out' ? 3.4 : 2.6;
+      cart.vCur = Math.min(top, (cart.vCur || 0) + 1.1 * dt);
+      cart.fx += cart.vCur * dt; cart.traceT = (cart.traceT || 0) - dt;
       if (cart.traceT <= 0){ cart.traceT = 0.5;
         addTrace(Math.floor(cart.fx), 50, { kind: 'r', x: cart.fx, y: 50.4, a: 0.5, r: 0.34 });
-        addTrace(Math.floor(cart.fx), 51, { kind: 'r', x: cart.fx, y: 51.6, a: 0.5, r: 0.34 }); }
-      if (cart.phase === 'in' && cart.fx >= 14){ cart.phase = 'unload'; cart.t = 7; }
+        addTrace(Math.floor(cart.fx), 51, { kind: 'r', x: cart.fx, y: 51.6, a: 0.5, r: 0.34 });
+        if (cart.vCur > 1.2) puff(cart.fx - 1.6, 51.2, 0, 3, { tint: 'dust', r: rr(4, 7), a: 0.28, life: rr(0.9, 1.6) }); }
+      if (cart.phase === 'in' && cart.fx >= 14){ cart.fx = 14; cart.phase = 'unload'; cart.vCur = 0; }
       if (cart.phase === 'out' && cart.fx > 97) cart.active = false; } }
+  /* the saw pit: logs become boards under a two-man frame saw (4.7) */
+  const saw = sim.saw, D47 = sim.stocks.depot;
+  sim.sawT = (sim.sawT ?? 3) - dt;
+  if (sim.sawT <= 0){ sim.sawT = 2;
+    if (!saw.active && D47.logs >= 1 && D47.timber < 42){ let hands = freeHands(8, [19.5, 46]).filter(h => h.fy > 30).slice(0, 2); if (hands.length < 2) hands = freeHands(2, [19.5, 46]);
+      if (hands.length >= 2){ hands[0].sawJob = 0; hands[1].sawJob = 1; saw.pair = hands.map(h => h.id); saw.active = true; saw.t = 0; } }
+    if (saw.active){ const crew0 = saw.pair.map(id => sim.soldiers.find(x => x.id === id));
+      if (crew0.some(h => !h || h.dead || h.sawJob === undefined || h.sawJob === null)){ crew0.forEach(h => { if (h) h.sawJob = undefined; }); saw.active = false; saw.pair = []; } } }
+  if (saw.active){ const crew = saw.pair.map(id => sim.soldiers.find(x => x.id === id)).filter(Boolean);
+    if (crew.length !== 2 || crew.some(h => h.dead || h.state === 'down')){ crew.forEach(h => { if (!h.dead && h.state !== 'down') h.sawJob = undefined; }); saw.active = false; saw.pair = []; saw.stallT = 0; }
+    const spots = [[18.5, 46.5], [20.5, 45.5]];
+    const bothOn = crew.length === 2 && crew.every(h => Math.hypot(spots[h.sawJob || 0][0] - h.fx, spots[h.sawJob || 0][1] - h.fy) <= 1.05);
+    if (!bothOn){ const idleOff = crew.some(h => !h.path && Math.hypot(spots[h.sawJob || 0][0] - h.fx, spots[h.sawJob || 0][1] - h.fy) > 1.05);
+      saw.stallT = idleOff ? (saw.stallT || 0) + dt : Math.max(0, (saw.stallT || 0) - dt);
+      if (saw.stallT > 45){ crew.forEach(h => h.sawJob = undefined); saw.active = false; saw.pair = []; saw.stallT = 0; } }
+    if (saw.active && bothOn){ saw.stallT = 0; saw.t += dt; saw.stroke = (saw.t % 1.5) / 1.5;
+      if (rng() < dt * 2.4) puff(19.5 + rr(-0.3, 0.3), 46 + rr(-0.2, 0.2), 0, 5, { tint: 'dust', r: rr(2.5, 4.5), a: 0.35, life: rr(0.7, 1.2) });
+      if (saw.t >= 7){ saw.t = 0; if (D47.logs >= 1){ D47.logs -= 1; D47.timber = Math.min(48, D47.timber + 2); }
+        if (D47.logs < 1){ crew.forEach(h => h.sawJob = undefined); saw.active = false; saw.pair = []; } } }
+    else if (saw.active) saw.stroke = 0; }
+  /* air visitors: a slow eye some mornings; now and then a gift falls out of the sky (4.7) */
+  const pl = sim.plane;
+  sim.planeT = (sim.planeT ?? rr(140, 260)) - dt;
+  if (!pl.active && sim.planeT <= 0){ if (sim.hour > 6.4 && sim.hour < 11.2){ pl.active = true; pl.fx = -8; pl.fy = rr(4, 14); }
+    else sim.planeT = 45; }
+  if (pl.active){ pl.fx += 4.1 * dt; pl.fy += 1.15 * dt; if (pl.fx > 102){ pl.active = false; sim.planeT = rr(180, 420); } }
+  sim.dropT = (sim.dropT ?? rr(320, 560)) - dt;
+  if (sim.dropT <= 0){ sim.dropT = rr(340, 640);
+    if (sim.hour > 6.8 && sim.hour < 17.5){ for (let i = 0; i < 3; i++) sim.drops.push({ fx: rr(14, 78), fy: rr(38, 47), h: rr(230, 300), sway: rr(0, 6.28) });
+      logEvent('supply', 'Parachutes open behind the line. A drop comes down slow in the wind.'); } }
+  for (let i = sim.drops.length - 1; i >= 0; i--){ const dr = sim.drops[i];
+    dr.h -= 13 * dt; dr.fx += Math.sin(sim.t * 0.7 + dr.sway) * dt * 0.7 + sim.windX * dt * 0.012;
+    if (dr.h <= 0){ sim.drops.splice(i, 1); const com = pick(['food', 'ammo', 'shells', 'med', 'water']);
+      const st = {}; st[com] = ri(3, 6); sim.crates.push({ fx: dr.fx, fy: dr.fy, stocks: st }); } }
+  sim.crateT = (sim.crateT ?? 4) - dt;
+  if (sim.crateT <= 0){ sim.crateT = 2.5;
+    sim.crates = sim.crates.filter(c => Object.values(c.stocks).reduce((a, b) => a + b, 0) > 0);
+    if (sim.crates.length && sim.soldiers.filter(x => x.supplyJob && String(x.supplyJob.from).startsWith('crate')).length < 2){
+      for (let ci = 0; ci < sim.crates.length; ci++){
+        if (sim.soldiers.some(x => x.supplyJob && x.supplyJob.from === 'crate' + ci)) continue;
+        const com = Object.keys(sim.crates[ci].stocks).find(k => sim.crates[ci].stocks[k] > 0);
+        if (!com) continue;
+        const free = freeHands(8, [sim.crates[ci].fx, sim.crates[ci].fy]).filter(h => h.fy > 28)[0] || freeHands(1, [sim.crates[ci].fx, sim.crates[ci].fy])[0];
+        if (free){ free.supplyJob = { com, qty: 3, from: 'crate' + ci, to: 'depot', phase: 'fetch' }; setState(free, 'idle', 0.2); }
+        break; } } }
   /* the mess queue is served from the pot; when the window closes, the line disperses */
   const messWinNow = (hf > 6.9 && hf < 8.4) || (hf > 11.9 && hf < 13.1) || (hf > 17.4 && hf < 18.6);
   if (!messWinNow && sim.queue.length) sim.queue.length = 0;
@@ -3593,6 +3750,12 @@ function draw(){
   for (let i = 0; i < sim.graves && i < sim.map.graveTiles.length; i++){ const [gx, gy] = sim.map.graveTiles[i];
     items.push({ k: gx + gy + 0.6, f: () => drawProp({ kind: 'grave', fx: gx + 0.5, fy: gy + 0.5, z: 0 }) }); }
   if (sim.cart && sim.cart.active) items.push({ k: sim.cart.fx + 50.5, f: () => drawCart() });
+  sim.hulks.forEach(hk => items.push({ k: hk.fx + 53.4, f: () => drawHulk(hk) }));
+  items.push({ k: 19.5 + 46 + 0.45, f: () => drawSawPit() });
+  sim.crates.forEach(cr => items.push({ k: cr.fx + cr.fy + 0.35, f: () => drawCrate(cr) }));
+  sim.drops.forEach(dr => items.push({ k: dr.fx + dr.fy + 0.45, f: () => drawDrop(dr) }));
+  if (sim.plane.active){ items.push({ k: sim.plane.fx + sim.plane.fy - 0.2, f: () => drawPlaneShadow() });
+    items.push({ k: 1e5 + 3, f: () => drawPlane() }); }
   sim.soldiers.forEach(s => { if (!s.gone) items.push({ k: s.fx + s.fy + 0.3, f: () => drawMan(s) }); });
   if (sim.cat) items.push({ k: sim.cat.fx + sim.cat.fy + 0.32, f: () => drawCat() });
   if (sim.works) items.push({ k: 1e5, f: () => drawWorks() });
@@ -3756,8 +3919,11 @@ function newSim(planetName, seedStr){
     ledger: [], intel: [{ dmg: 0, ammo: 8, t: 0 }, { dmg: 0, ammo: 8, t: 0 }, { dmg: 0, ammo: 8, t: 0 }], intelWire: { down: false, t: 0 }, inflight: [], radioRetry: [], repT: 25, wireCut: null, order: null, pendingAssign: null, queue: [], freshScars: {}, works: null, works2: null, worksCycle: 0, searchlights: [], seedStr, planetName, moonOff: hash2(hashStr(seedStr + '|' + planetName), 5.1) * 29.5, cat: { fx: 44.5, fy: 36.4, z: 0, mode: 'sit', t: 3, tx: 44.5, ty: 36.4, faceA: 0 },
     bunkTaken: new Set(), bedTaken: new Set(), bearerJobs: [], spotted: null,
     missionQ: [], emMissionQ: [], dramaT: rr(26, 44), orderT: rr(50, 90), logisticsT: 4, batteryT: 2, talkT: 6,
-    cart: { active: false, fx: -6, dir: 1, t: rr(24, 44) },
-    stocks: { depot: { food: 14, ammo: 26, shells: 34, timber: 16, water: 20, oil: 6, med: 6, cable: 5 },
+    cart: { active: false, fx: -6, dir: 1, t: rr(24, 44), phase: 'gone', cargo: null, vCur: 0 },
+    saw: { active: false, pair: [], t: 0, stroke: 0 },
+    plane: { active: false, fx: -8, fy: 8 },
+    drops: [], crates: [], hulks: [],
+    stocks: { depot: { food: 14, ammo: 26, shells: 34, timber: 16, logs: 4, water: 20, oil: 6, med: 6, cable: 5 },
       sectors: [{ ammo: 8, timber: 5, water: 6, oil: 2 }, { ammo: 8, timber: 5, water: 6, oil: 2 }, { ammo: 8, timber: 5, water: 6, oil: 2 }],
       cook: { food: 5, water: 8, oil: 2 }, battery: { shells: 0, oil: 2 }, aid: { med: 5, oil: 2 }, hq: { oil: 3, cable: 4 } },
     guns: [ { fx: 26.5, fy: 45.5, z: 0, enemy: false, ammo: 10, cycle: 'idle', ct: rr(1, 3), recoil: 0, recX: 0, recV: 0, flash: 0, elev: rr(.2, .5) },
