@@ -835,6 +835,45 @@ const KG_ESKINS = ['#cdb49b', '#bfa78c', '#dbc0a2', '#c2ab90'];
 const KG_SCARVES = ['#9c4433', '#cfa146', '#638376', '#7d7199', '#b06a35', '#47647d', null, null];
 const KG_STYLES = ['full', 'fork', 'braid', 'wild', 'short'];
 function kgHash(str){ let h = 2166136261; for (let i = 0; i < str.length; i++){ h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+function kgHslHex(h, s2, l){ h = (((h % 360) + 360) % 360) / 360; const q = l < 0.5 ? l * (1 + s2) : l + s2 - l * s2, p = 2 * l - q;
+  const f = t => { t = ((t % 1) + 1) % 1; if (t < 1 / 6) return p + (q - p) * 6 * t; if (t < 1 / 2) return q; if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6; return p; };
+  const to = v => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, '0');
+  return '#' + to(f(h + 1 / 3)) + to(f(h)) + to(f(h - 1 / 3)); }
+/* THE SCARF: every friendly wears one, drawn continuous from his own hash stream:
+   any hue in a muted band, one of four patterns, a second colour. Millions of
+   combinations; no two men in a war alike. This spec is the single source the
+   painters, the record and the colour society all read. */
+function scarfOf(s){ if (!s || s.enemy) return null;
+  if (s.__scarfSpec !== undefined) return s.__scarfSpec;
+  const warSeed = (typeof sim !== 'undefined' && sim && sim.seedStr) ? sim.seedStr : null;
+  const rnd = mulberry32(kgHash((warSeed || 'war') + '|scarf|' + s.id));
+  const hue = rnd() * 360, sat = 0.30 + rnd() * 0.30, li = 0.32 + rnd() * 0.26;
+  const pr = rnd(); const pat = pr < 0.42 ? 0 : pr < 0.66 ? 1 : pr < 0.84 ? 2 : 3;
+  const hue2 = (hue + 26 + rnd() * 44) % 360;
+  const hex = kgHslHex(hue, sat, li), hex2 = kgHslHex(hue2, Math.min(0.62, sat + 0.04), Math.max(0.2, Math.min(0.68, li + (rnd() < 0.5 ? -0.1 : 0.12))));
+  const fam = hue < 14 || hue >= 345 ? 'crimson' : hue < 38 ? 'rust' : hue < 62 ? 'ochre' : hue < 92 ? 'olive' : hue < 148 ? 'green' : hue < 188 ? 'teal' : hue < 222 ? 'blue' : hue < 252 ? 'indigo' : hue < 288 ? 'violet' : 'plum';
+  const shade = li < 0.37 ? 'deep ' : li > 0.52 ? 'pale ' : '';
+  const spec = { hex, hex2, hue, sat, li, pat, family: fam,
+    name: shade + (sat < 0.36 ? 'ash-' : '') + fam,
+    patWord: pat === 1 ? ' striped' : pat === 2 ? ' check' : pat === 3 ? ' half-and-half' : '',
+    likeHue: (hue + 80 + rnd() * 130) % 360, hateHue: (hue + 165 + rnd() * 50) % 360 };
+  if (warSeed) s.__scarfSpec = spec;
+  return spec; }
+/* colour society: a man warms to his own family and to the colour he likes,
+   and cold-shoulders the colour he hates. Seeded, silent, never labelled. */
+function scarfAffinity(a, b){ const sa = scarfOf(a), sb = scarfOf(b); if (!sa || !sb) return 0;
+  const dist = (x, y) => { const d = Math.abs(x - y) % 360; return d > 180 ? 360 - d : d; };
+  let v = 0; if (dist(sa.hue, sb.hue) < 20) v += 0.3;
+  if (dist(sa.likeHue, sb.hue) < 30) v += 0.5;
+  if (dist(sa.hateHue, sb.hue) < 22) v -= 0.6; return v; }
+function scarfClique(){ const fam = {}; const men = sim.soldiers.filter(s => !s.dead && !s.enemy);
+  men.forEach(s => { const sp = scarfOf(s); if (!sp) return; (fam[sp.family] = fam[sp.family] || []).push(s); });
+  let best = null;
+  for (const k in fam){ const g = fam[k]; if (g.length < 6) continue; let bonds = 0;
+    for (let i = 0; i < g.length; i++) for (let j = i + 1; j < g.length; j++){ const a = g[i], b = g[j];
+      if ((a.bond && a.bond[b.id] > 0.2) || (b.bond && b.bond[a.id] > 0.2)) bonds++; }
+    if (bonds >= 3 && (!best || g.length > best.g.length)) best = { k, g }; }
+  return best ? 'The ' + best.k + ' scarves have taken to messing together; there are ' + best.g.length + ' of them now, and they keep their own company.' : null; }
 function kgLook(s){
   const warSeed = (typeof sim !== 'undefined' && sim && sim.seedStr) ? sim.seedStr : 'war';
   const rnd = mulberry32(kgHash(warSeed + '|kg|' + (s.enemy ? 'E' : 'F') + '|' + s.id));
@@ -842,10 +881,12 @@ function kgLook(s){
   const coat = coats[(rnd() * coats.length) | 0], beard = beards[(rnd() * beards.length) | 0];
   const patches = []; const nP = 1 + ((rnd() * 3) | 0);
   for (let i = 0; i < nP; i++) patches.push({ x: (rnd() - 0.5) * 22, y: -34 + rnd() * 22, w: 4 + rnd() * 4, h: 3.6 + rnd() * 3.4, tone: rnd() });
+  const SC = scarfOf(s);
   return { enemy: !!s.enemy, coat, beard, patches,
     beardStyle: KG_STYLES[(rnd() * KG_STYLES.length) | 0],
     skin: skins[(rnd() * skins.length) | 0],
-    scarf: s.enemy ? null : KG_SCARVES[(rnd() * KG_SCARVES.length) | 0],
+    scarf: SC ? SC.hex : null, scarf2: SC ? SC.hex2 : null, scarfPat: SC ? SC.pat : 0, scarfHue: SC ? SC.hue : -1,
+    scarfName: SC ? SC.name : '', scarfPatWord: SC ? SC.patWord : '',
     girth: s.enemy ? 0.84 + rnd() * 0.16 : 0.92 + rnd() * 0.2,
     height: s.enemy ? 1.0 + rnd() * 0.12 : 0.94 + rnd() * 0.12,
     lamp: !s.enemy && rnd() < 0.82, lampSide: rnd() < 0.5 ? -1 : 1,
@@ -890,6 +931,15 @@ function kgR(g, x, y, w, h, c){ g.fillStyle = c; g.fillRect(x, y, w, h); }
 function kgL(g, x0, y0, x1, y1, w, c){ g.strokeStyle = c; g.lineWidth = w; g.lineCap = 'round'; g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.stroke(); }
 function kgE(g, x, y, rx, ry, c){ g.fillStyle = c; g.beginPath(); g.ellipse(x, y, Math.abs(rx), Math.abs(ry || rx), 0, 0, KGT); g.fill(); }
 const KG_KNEEL = ['lay', 'crank', 'repair', 'cook'];
+function kgScarfBand(g, x, y, w, h){ const CU = KG_CUR; if (!CU.scarf) return; kgR(g, x, y, w, h, CU.scarf);
+  if (CU.scarfPat === 1){ kgR(g, x + w * 0.3, y, Math.max(1.2, w * 0.09), h, CU.scarf2); kgR(g, x + w * 0.62, y, Math.max(1.2, w * 0.09), h, CU.scarf2); }
+  else if (CU.scarfPat === 2){ kgR(g, x + w * 0.24, y, w * 0.52, Math.max(1, h * 0.34), CU.scarf2); kgR(g, x + w * 0.47, y, Math.max(1.2, w * 0.08), h, CU.scarf2); }
+  else if (CU.scarfPat === 3){ kgR(g, x + w * 0.55, y, w * 0.45, h, CU.scarf2); } }
+function kgScarfTail(g, x, y, dir, len, sway){ const CU = KG_CUR; if (!CU.scarf) return;
+  g.fillStyle = CU.scarf; g.beginPath(); g.moveTo(x, y); g.lineTo(x + 3.6, y);
+  g.lineTo(x + 3.6 + sway + dir * 1.6, y + len); g.lineTo(x + sway + dir * 1.6 - 0.8, y + len + 1.6); g.closePath(); g.fill();
+  if (CU.scarfPat === 1 || CU.scarfPat === 2) kgR(g, x + sway * 0.8, y + len - 1.6, 3.4, 1.5, CU.scarf2);
+  else if (CU.scarfPat === 3) kgR(g, x + sway * 0.8, y + len * 0.45, 3.4, Math.max(1.5, len * 0.5), CU.scarf2); }
 function kgS(g, x, GY, pose, ph){
   const P = KG_P, CU = KG_CUR, B = P.beard, t = 1.3 + CU.seedKey;
   const walking = pose === 'walk', sw = walking ? Math.sin(ph * KGT) : 0;
@@ -971,7 +1021,7 @@ function kgS(g, x, GY, pose, ph){
     if (pose === 'stand' && CU.rifle){ kgL(g, x + 21, GY - 40, x + 23, GY - 6, 3.6, P.leather); kgL(g, x + 22, GY - 24, x + 24, GY - 44, 2.2, P.steel); } }
   /* head */
   g.save(); g.translate(0, bow);
-  if (CU.scarf) kgR(g, x - 9.4, GY - 80.4, 18.8, 3.4, CU.scarf);
+  kgScarfBand(g, x - 9.4, GY - 80.4, 18.8, 3.4); kgScarfTail(g, x - 8.8, GY - 77.2, -1, walking ? 7.5 : 11, walking ? Math.sin(ph * KGT) * 2.4 - 1.5 : Math.sin(t * 1.4 + x) * 0.8);
   kgE(g, x + 1, GY - 84, 7.6, 7.2, P.skin);
   const bB = CU.beardStyle === 'short' ? -62.5 : -55.4, bW = CU.beardStyle === 'wild' ? 1.5 : 0;
   g.beginPath(); g.moveTo(x - 8.6 - bW, GY - 82); g.quadraticCurveTo(x - 9.6 - bW, GY - 66, x - 4.6, GY - 61.4 + (bB + 55.4));
@@ -1053,7 +1103,7 @@ function kgEast(g, x, GY, pose, ph){
   else { const gv = [x + 3 - sw * 5, GY - 40]; aN(gv[0], gv[1]); aF(x - 5 - sw * 3, GY - 40);
     if (pose === 'stand' && CU.rifle){ kgL(g, gv[0] + 3, GY - 40, gv[0] + 5, GY - 8, 3.4, P.leather); kgL(g, gv[0] + 4, GY - 26, gv[0] + 6.6, GY - 45, 2.2, P.steel); } }
   g.save(); g.translate(0, bow);
-  if (CU.scarf) kgR(g, x - 3, GY - 80.2, 13, 3.2, CU.scarf);
+  kgScarfBand(g, x - 3, GY - 80.2, 13, 3.2); kgScarfTail(g, x - 2.8, GY - 77.2, -1, walking ? 7 : 10, walking ? Math.sin(ph * KGT) * 2 - 1.2 : Math.sin(t * 1.4 + x) * 0.7);
   kgE(g, x + 3.4, GY - 84, 6.4, 7, P.skin);
   g.beginPath(); g.moveTo(x - 3.4, GY - 83); g.quadraticCurveTo(x + 10.6, GY - 84, x + 11.6, GY - 72);
   g.quadraticCurveTo(x + 10.8, GY - 62, x + 6.4, GY - 59); g.quadraticCurveTo(x - 1, GY - 57.4, x - 3, GY - 64);
@@ -1095,7 +1145,7 @@ function kgN(g, x, GY, pose, ph){
     if (CU.bayonet) kgL(g, x - 19, GY - 88, x - 25, GY - 92, 1.3, P.pale); }
   if (pose === 'carry'){ kgR(g, x - 19.4, GY - 52, 4.4, 15, P.leather); kgR(g, x + 15, GY - 52, 4.4, 15, P.leather); }
   kgRim(g, [[x + 16.8, GY - 76], [x + 17.4, GY - 64], [x + 17.2, GY - 58], [x + 19.4, GY - 40], [x + 19.8, GY - 33], [x + 19.2, GY - 26]]);
-  if (CU.scarf) kgR(g, x - 9.4, GY - 80.6, 18.8, 3.2, CU.scarf);
+  kgScarfBand(g, x - 9.4, GY - 80.6, 18.8, 3.2); kgScarfTail(g, x - 1.8, GY - 77.6, 0, walking ? 8 : 11.5, walking ? Math.sin(ph * KGT) * 2.2 : Math.sin(t * 1.4 + x) * 0.8);
   kgClump(g, x - 8.8, GY - 76, 3.6, 10, [B[1]], x + 131, 5, 1.5); kgClump(g, x + 8.8, GY - 76, 3.6, 10, [B[1]], x + 137, 5, 1.5);
   if (CU.enemy){ g.fillStyle = P.coatD; g.beginPath(); g.ellipse(x + 0.6, GY - 88.6, 10.2, 7.6, 0, Math.PI, 0); g.fill();
     kgR(g, x - 10.4, GY - 89.2, 23.2, 2.8, P.coatD); kgR(g, x - 10.4, GY - 89.2, 4.2, 6.4, P.coatD); }
@@ -1119,6 +1169,7 @@ function kgSitE(g, x, GY, pose){
   g.save(); g.clip(); kgClump(g, x, GY - 22, 38, 36, [P.coatD, P.coat], x + 19, 20, 1.1); kgR(g, x - 23, GY - 45, 8, 44, 'rgba(0,0,0,.22)'); g.restore();
   kgR(g, x + 12, GY - 5, 12.6, 4.4, P.dark); kgR(g, x - 2, GY - 4.4, 11, 4.2, P.dark);
   g.save(); g.translate(0, 3);
+  kgScarfBand(g, x - 3, GY - 79.2, 13, 3.2);
   kgE(g, x + 3.4, GY - 82, 6.4, 7, P.skin);
   g.beginPath(); g.moveTo(x - 3.4, GY - 81); g.quadraticCurveTo(x + 10.6, GY - 82, x + 11.6, GY - 70);
   g.quadraticCurveTo(x + 10.8, GY - 60, x + 6.4, GY - 57); g.quadraticCurveTo(x - 1, GY - 55.4, x - 3, GY - 62);
@@ -1155,6 +1206,7 @@ function kgSitS(g, x, GY, pose){
   g.save(); g.clip(); kgClump(g, x, GY - 22, 42, 36, [P.coatD, P.coat], x + 19, 20, 1.1); g.restore();
   kgR(g, x - 16, GY - 5, 12.4, 4.4, P.dark); kgR(g, x + 4, GY - 5, 12.4, 4.4, P.dark);
   g.save(); g.translate(0, 3);
+  kgScarfBand(g, x - 9.4, GY - 77.6, 18.8, 3.2);
   kgE(g, x + 1, GY - 82, 7.6, 7.2, P.skin);
   g.beginPath(); g.moveTo(x - 8.6, GY - 80); g.quadraticCurveTo(x - 9.6, GY - 64, x - 4.6, GY - 59.4);
   g.quadraticCurveTo(x, GY - 53.4, x + 4.6, GY - 59.4); g.quadraticCurveTo(x + 9.6, GY - 64, x + 8.6, GY - 80);
@@ -1189,6 +1241,7 @@ function kgDown(g, x, GY, sleep){
   g.restore();
   kgR(g, x + 35, GY - 6.4, 11, 4.4, P.dark); kgR(g, x + 36.6, GY - 10.4, 10, 4.2, P.dark);
   kgE(g, x - 33, GY - 12.4, 6.8, 6, P.skin);
+  if (CU.scarf) kgScarfBand(g, x - 39.5, GY - 13.8, 3.4, 7.5);
   kgE(g, x - 28.4, GY - 9.4, 6.4, 5, B[1]); kgClump(g, x - 28, GY - 9, 10, 8, B, 91 + CU.seedKey, 8, 0.9);
   if (sleep){ g.fillStyle = P.coatD; g.beginPath(); g.ellipse(x - 44, GY - 3.4, 8.6, 3.4, 0, 0, KGT); g.fill();
     if (!CU.enemy) kgE(g, x - 44, GY - 5.4, 1.4, '#ffd98a'); }
@@ -1204,6 +1257,7 @@ function kgProne(g, x, GY){
   kgR(g, x - 44, GY - 6.4, 11, 4.4, P.dark); kgR(g, x - 43, GY - 10.2, 10, 4.2, P.dark);
   kgE(g, x - 20, GY - 12, 8.6, 5.4, P.leather);
   kgE(g, x + 27, GY - 13.4, 6.6, 6.2, P.skin);
+  if (CU.scarf) kgScarfBand(g, x + 19.8, GY - 14.8, 3.4, 7.5);
   kgE(g, x + 24.6, GY - 9.6, 5.6, 4.6, B[1]); kgClump(g, x + 24.6, GY - 10, 9, 7, B, 61 + CU.seedKey, 7, 0.9);
   g.fillStyle = P.coatD; g.beginPath(); g.ellipse(x + 27.4, GY - 19.6, 8.2, 4.2, 0, Math.PI, 0); g.fill();
   kgR(g, x + 19.4, GY - 19.8, 17.4, 2.2, P.coatD);
@@ -1222,6 +1276,7 @@ function kgPixelPass(cv, look){
   const pal = [look.coat[0], look.coat[1], look.coat[2], '#554636', '#241d13', '#7d5c36', '#99744a', '#cfa146', '#3b3831', '#5a564e',
     look.skin, '#96683f', look.beard[0], look.beard[1], look.beard[2], '#ffd98a', '#14100c', '#ddd6c4', '#b03024', '#c33d21', '#6f6353', '#857a66'].map(kgHexRgb);
   if (look.scarf) pal.push(kgHexRgb(look.scarf));
+  if (look.scarf2) pal.push(kgHexRgb(look.scarf2));
   const isOp = i => d[i * 4 + 3] > 90;
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++){
     const i = y * W + x, o = i * 4;
@@ -1581,6 +1636,12 @@ function drawMan(s){
   ctx.scale(h * (1 + (1 - squash) * 0.6), h * squash * (s.stanceK === undefined ? 1 : s.stanceK));
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(spr, -23, -64, 46, 64);
+  if (!s.enemy){ const SC2 = scarfOf(s); if (SC2){ const fl = Math.sin(perfT * (2 + Math.abs(sim.windX || 0) * 0.35) + s.id * 2.1) * (1 + Math.abs(sim.windX || 0) * 0.14)
+      + (s.path ? Math.sin(s.phase) * 1.6 : 0) + ((s.jumpy || 0) > 150 && !s.path ? Math.sin(perfT * 7 + s.id) * 0.8 : 0);
+    const droop = (sim.rain || 0) > 0.3 ? 1.6 : 0; const nx = F === 'E' ? 4.5 : F === 'N' ? 0 : -4.5, ny = -44;
+    ctx.strokeStyle = SC2.hex; ctx.lineWidth = 2.1; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(nx, ny);
+    ctx.quadraticCurveTo(nx - 2.5 + fl * 0.4, ny + 4 + droop, nx - 3.5 + fl, ny + 7.5 + droop * 1.6); ctx.stroke();
+    if (SC2.pat === 3){ ctx.strokeStyle = SC2.hex2; ctx.beginPath(); ctx.moveTo(nx - 2.8 + fl * 0.75, ny + 5 + droop * 1.3); ctx.lineTo(nx - 3.5 + fl, ny + 7.5 + droop * 1.6); ctx.stroke(); } } }
   ctx.restore();
   if (pose === 'aim') s.muzzlePos = [sx + (F === 'E' ? 17 : F === 'N' ? -8 : 10), sy - 29];
 }
@@ -2145,8 +2206,9 @@ function describeMan(s){
   const tall = s.h > 1.01 ? 'tall ' : s.h < 0.97 ? 'short ' : '';
   const trade = { rifle:'rifleman', sent:'sentry', cook:'cook', sign:'signaller', medic:'medic', bearer:'stretcher-bearer',
     sapper:'sapper', gunner:'gunner', runner:'runner', carrier:'carrier', officer:'officer', sergeant:'sergeant',
-    observer:'observer', egun:'gunner', esent:'sentry' }[s.trade] || 'soldier';
-  const scarf = s.scarf === 'accent' ? ' with the ember scarf' : s.scarf === 'accent2' ? ' with the teal scarf' : '';
+    observer:'observer', egun:'gunner', esent:'sentry', esap:'sapper' }[s.trade] || 'soldier';
+  const SC = s.enemy ? null : scarfOf(s);
+  const scarf = SC ? ' with the ' + SC.name + SC.patWord + ' scarf' : '';
   return 'the ' + tall + trade + scarf;
 }
 function think(s){
@@ -2322,17 +2384,17 @@ function directorTick(dt){
   const a = free[0];
   const bonded = free.filter(s => s !== a && a.bond && a.bond[s.id] > 0.15 && Math.hypot(s.fx - a.fx, s.fy - a.fy) < 3.4)
     .sort((x, y) => (a.bond[y.id] || 0) - (a.bond[x.id] || 0))[0];
-  const near = bonded || free.filter(s => s !== a && Math.hypot(s.fx - a.fx, s.fy - a.fy) < 2.6 &&
+  const near = bonded || free.filter(s => s !== a && Math.hypot(s.fx - a.fx, s.fy - a.fy) < 2.6 && scarfAffinity(a, s) > -0.55 &&
       !(a.bias && a.bias[s.id] < -0.4 && !(a.bond && a.bond[s.id] > 0.2)))
-    .sort((x, y) => Math.hypot(x.fx - a.fx, x.fy - a.fy) - Math.hypot(y.fx - a.fx, y.fy - a.fy))[0];
+    .sort((x, y) => (Math.hypot(x.fx - a.fx, x.fy - a.fy) - scarfAffinity(a, x) * 0.8) - (Math.hypot(y.fx - a.fx, y.fy - a.fy) - scarfAffinity(a, y) * 0.8))[0];
   if (near && rng() < 0.82){
     const dur = rr(14, 28);
     a.vig = null; near.vig = null;
     a.talk = { with: near.id, t: dur }; near.talk = { with: a.id, t: dur };
     a.letterT = 0; near.letterT = 0;
     a.bond = a.bond || {}; near.bond = near.bond || {};
-    a.bond[near.id] = Math.min(1, (a.bond[near.id] || 0) + 0.14);
-    near.bond[a.id] = Math.min(1, (near.bond[a.id] || 0) + 0.14);
+    a.bond[near.id] = Math.min(1, (a.bond[near.id] || 0) + 0.14 + Math.max(-0.06, Math.min(0.08, scarfAffinity(a, near) * 0.12)));
+    near.bond[a.id] = Math.min(1, (near.bond[a.id] || 0) + 0.14 + Math.max(-0.06, Math.min(0.08, scarfAffinity(near, a) * 0.12)));
     /* gossip: the newest thing each has seen passes to the other */
     const newest = s => (s.seen || []).filter(e => sim.t - e.t < 3000).sort((x, y) => y.t - x.t)[0];
     [[a, near], [near, a]].forEach(([from, to]) => { const ev = newest(from); if (!ev) return;
@@ -2511,6 +2573,7 @@ function killSoldier(s, cause){
   startRag(s, -Math.cos(s.faceA) * rr(0.8, 1.5), -Math.sin(s.faceA) * rr(0.8, 1.5), rr(-5, 5));
   s.dead = true; s.state = 'down'; s.path = null; s.vig = null; s.foe = null; s.sawJob = undefined; s.sawReady = false; s.wreckJob = false; s.gatherId = undefined;
   sim.soldiers.forEach(o => { if (!o.dead && !o.enemy && o !== s && (o.friend === s.id || (o.bond && o.bond[s.id] > 0.3))) o.grief = Math.min(1, (o.grief || 0) + 0.5); });
+  if (!s.enemy) sim.soldiers.forEach(o => { if (!o.dead && !o.enemy && o !== s && o.friend !== s.id && scarfAffinity(o, s) > 0.45) o.grief = Math.min(1, (o.grief || 0) + 0.25); });
   if (!s.enemy){ sim.soldiers.forEach(o => { if (!o.dead && !o.enemy && o !== s && (o.friend === s.id || (o.bond && o.bond[s.id] > 0.3))) o.morale = Math.max(0, (o.morale ?? 0.7) - 0.05); });
     if (s.trade === 'sergeant'){ const ci = sectorOfX(s.fx); sim.confuse[ci] = 15;
       sim.soldiers.forEach(o => { if (!o.dead && !o.enemy && sectorOfX(o.fx) === ci) o.jumpy = Math.max(o.jumpy || 0, 300); });
@@ -3234,8 +3297,8 @@ function squadTick(){
   for (let i = 0; i < line.length; i++) for (let j = i + 1; j < line.length; j++){ const a = line[i], b = line[j];
     if (a.sector === b.sector && Math.hypot(a.fx - b.fx, a.fy - b.fy) < 2.3){   // shared bays bond men slowly
       a.bond = a.bond || {}; b.bond = b.bond || {};
-      a.bond[b.id] = Math.min(1, (a.bond[b.id] || 0) + 0.02);
-      b.bond[a.id] = Math.min(1, (b.bond[a.id] || 0) + 0.02); } }
+      a.bond[b.id] = Math.min(1, (a.bond[b.id] || 0) + 0.02 + Math.max(-0.01, Math.min(0.015, scarfAffinity(a, b) * 0.02)));
+      b.bond[a.id] = Math.min(1, (b.bond[a.id] || 0) + 0.02 + Math.max(-0.01, Math.min(0.015, scarfAffinity(b, a) * 0.02))); } }
   sim.squads = sim.squads.filter(sq => { const alive = line.filter(m => m.squad === sq.id);
     if (alive.length < 2){ alive.forEach(m => { m.squad = -1; m.squadMark = 0; }); return false; } return true; });
   for (const m of line){ if (m.squad >= 0) continue;
@@ -3494,6 +3557,7 @@ function buildWeekly(live){
   { const notices = [];
     const brk = evs.filter(e => e.kind === 'good' && e.text.includes('comes back to himself'))[0];
     if (brk) notices.push(brk.text);
+    const clq = scarfClique(); if (clq && notices.length < 2) notices.push(clq);
     const heavy = sim.soldiers.find(o => !o.dead && !o.enemy && o.record && (o.record.deathsSeen || 0) >= 3);
     if (heavy && notices.length < 2) notices.push(cap1(describeMan(heavy)) + ' has stood over three graves, and keeps his post.');
     if (notices.length) h += '<h3>Notices</h3>' + notices.map(t => '<p>' + t + '</p>').join(''); }
@@ -3682,7 +3746,7 @@ function socialTick(dt){
       const ms = G.men.map(id => sim.soldiers.find(x => x.id === id)).filter(Boolean);
       if (ms.length >= 2){ const a = pick(ms), b = pick(ms.filter(x => x !== a));
         if (b){ a.bond = a.bond || {}; b.bond = b.bond || {};
-          a.bond[b.id] = Math.min(1, (a.bond[b.id] || 0) + 0.05); b.bond[a.id] = Math.min(1, (b.bond[a.id] || 0) + 0.05);
+          a.bond[b.id] = Math.min(1, (a.bond[b.id] || 0) + 0.05 + Math.max(-0.03, Math.min(0.03, scarfAffinity(a, b) * 0.03))); b.bond[a.id] = Math.min(1, (b.bond[a.id] || 0) + 0.05 + Math.max(-0.03, Math.min(0.03, scarfAffinity(b, a) * 0.03)));
           const newest = s2 => (s2.seen || []).filter(e => sim.t - e.t < 3000).sort((x, y) => y.t - x.t)[0];
           [[a, b], [b, a]].forEach(([fr, to]) => { const ev = newest(fr); if (!ev) return; to.seen = to.seen || [];
             if (to.seen.some(e => e.key === ev.key)) return; to.seen.push(ev);
