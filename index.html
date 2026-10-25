@@ -242,9 +242,16 @@ function findPath(sx, sy, tx, ty, opts){
     if (o.state === 'watch' || o.state === 'sleep' || o.talk || o.inBed || (sim.queue && sim.queue.includes(o.id))){
       const k = Math.floor(o.fx) + ',' + Math.floor(o.fy);
       if (k !== sx + ',' + sy) blocked.add(k); } }
-  const p = bfsPath(sx, sy, tx, ty, opts, blocked);
+  /* the trench is the road; the open field is for errands. Ordinary travel routes
+     through the diggings first, and only crosses exposed ground when the errand
+     itself is out there (a patrol post, a sap head, a man down in the open). */
+  let p = null;
+  if (!opts.exposeOk && !exposedTile(goal) && !exposedTile(start))
+    p = bfsPath(sx, sy, tx, ty, { ...opts, trenchRoad: true }, blocked);
+  if (!p) p = bfsPath(sx, sy, tx, ty, opts, blocked);
   return p || bfsPath(sx, sy, tx, ty, opts, null);
 }
+function exposedTile(t){ return !!t && (t.type === 'ground' || t.type === 'crater') && t.gy > enemyY(t.gx) + 1 && t.gy < trenchY(t.gx) - 1; }
 function bfsPath(sx, sy, tx, ty, opts, blocked){
   const key = (x, y) => x + ',' + y;
   const q = [[sx, sy]], prev = new Map([[key(sx, sy), null]]); let qh = 0;
@@ -254,6 +261,7 @@ function bfsPath(sx, sy, tx, ty, opts, blocked){
     for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
       const nx = cx + dx, ny = cy + dy, nt = tileAt(nx, ny);
       if (!nt || prev.has(key(nx, ny)) || !walkable(nt, opts.enemy)) continue;
+      if (opts.trenchRoad && !(nx === tx && ny === ty) && exposedTile(nt)) continue;
       if (blocked && blocked.has(key(nx, ny)) && !(nx === tx && ny === ty)) continue;
       const dz = Math.abs(nt.z - ct.z);
       const ladderEdge = sim.map.ladders.has(key(cx, cy) + '>' + key(nx, ny));
@@ -336,6 +344,10 @@ function drawNearFace(f){
   const A = [isoX(f.gx, f.gy + 1), isoY(f.gx, f.gy + 1, 0)], B = [isoX(f.gx + 1, f.gy + 1), isoY(f.gx + 1, f.gy + 1, 0)];
   const B2 = [isoX(f.gx + 1, f.gy + 1), isoY(f.gx + 1, f.gy + 1, f.z)], A2 = [isoX(f.gx, f.gy + 1), isoY(f.gx, f.gy + 1, f.z)];
   paintWallTexture(A[0], A[1], B[0], B[1], B2[0], B2[1], A2[0], A2[1], f.gx * 3.1 + f.gy * 7.7);
+  ctx.fillStyle = 'rgba(10,8,5,0.26)';   // shadow gathers under the lip: the wall reads as depth, not decoration
+  ctx.beginPath(); ctx.moveTo(A[0], A[1]); ctx.lineTo(B[0], B[1]);
+  ctx.lineTo(lerp(B[0], B2[0], 0.34), lerp(B[1], B2[1], 0.34)); ctx.lineTo(lerp(A[0], A2[0], 0.34), lerp(A[1], A2[1], 0.34));
+  ctx.closePath(); ctx.fill();
   ctx.strokeStyle = 'rgba(110,86,54,.55)'; ctx.lineWidth = 1.4;
   [0.4, 0.74].forEach(k => { ctx.beginPath();
     ctx.moveTo(lerp(A[0], A2[0], k), lerp(A[1], A2[1], k)); ctx.lineTo(lerp(B[0], B2[0], k), lerp(B[1], B2[1], k)); ctx.stroke(); });
@@ -518,7 +530,7 @@ function soldierMove(s, dt){
     s.z += (tz - s.z) * Math.min(1, dt * 7); s.vx = 0; s.vy = 0; return; }
   if (s.yieldT > 0){ s.yieldT -= dt; s.vx = 0; s.vy = 0;
     const bx2 = s.fx - Math.cos(s.faceA) * 0.3 * dt, by2 = s.fy - Math.sin(s.faceA) * 0.3 * dt;
-    if (walkable(tileAt(Math.floor(bx2), Math.floor(by2)), s.enemy)){ s.fx = bx2; s.fy = by2; }
+    if (walkable(tileAt(Math.floor(bx2), Math.floor(by2)), s.enemy) && !layerCross(s, bx2, by2)){ s.fx = bx2; s.fy = by2; }
     const tz2 = (tileAt(Math.floor(s.fx), Math.floor(s.fy)) || { z: s.z }).z;
     s.z += (tz2 - s.z) * Math.min(1, dt * 7); return; }
   const node = s.path[s.pathI];
@@ -550,7 +562,7 @@ function soldierMove(s, dt){
         if (Math.hypot(b.fx - s.destFx, b.fy - s.destFy) < b.r + 0.42){ lastR = 0.55; break; } } }
     if (blockO){ const px = diry, py = -dirx, ox = s.fx + px * 0.36, oy = s.fy + py * 0.36;
       const anchored = blockO.state === 'watch' || blockO.state === 'sleep';
-      if (walkable(tileAt(Math.floor(ox), Math.floor(oy)), s.enemy)){ aimX = wx + px * 0.36; aimY = wy + py * 0.36; sq = 0.55; }
+      if (walkable(tileAt(Math.floor(ox), Math.floor(oy)), s.enemy) && !layerCross(s, ox, oy)){ aimX = wx + px * 0.36; aimY = wy + py * 0.36; sq = 0.55; }
       else if (!anchored && blockO.path && (bodyPriority(s) < bodyPriority(blockO) || (bodyPriority(s) === bodyPriority(blockO) && s.id > blockO.id))){
         s.yieldT = rr(0.4, 0.7); }
       else sq = 0.4; } }
@@ -580,6 +592,8 @@ function soldierMove(s, dt){
 }
 function arrive(s){
   s.settleT = perfT;
+  if ((s.state === 'run' || s.state === 'carry' || s.state === 'drag') && !s.dead)   // heels dig in: a little of the road arrives with him
+    for (let i = 0; i < 2; i++) sim.parts.push({ kind:'dirt', fx: s.fx, fy: s.fy, z: s.z, ox: rr(-3, 3), oy: 0, h: 1.2, vx: rr(-5, 5), vy: rr(-2, 2), vh: rr(8, 16), life: rr(.2, .35), t: 0, col: PAL.soilDark, r: rr(0.7, 1.1) });
   if (s.resumeDest){ const rd = s.resumeDest; s.resumeDest = null; s.stallN = 0; s.arriveAct = null;
     if (goTo(s, rd[0], rd[1], { act: rd[2] || 'idle' })) return; }
   s.stallN = 0;
@@ -2583,7 +2597,11 @@ function updateSoldier(s, dt){
           if (s.phaseT <= 0){ s.bearerPhase = 'carry'; c.carriedBy = s;
             goTo(s, c.bedTile[0], c.bedTile[1], { state: 'drag' }); } } }
       else if (s.bearerPhase === 'carry'){ const c2 = s.carryCas;
-        if (pt && !pt.dead){ c2.fx = (s.fx + pt.fx) / 2; c2.fy = (s.fy + pt.fy) / 2; c2.z = s.z; }
+        if (pt && !pt.dead){ const pd = Math.hypot(pt.fx - s.fx, pt.fy - s.fy);
+          const w = clamp((pd - 1.6) / 1.6, 0, 1);   // partner at the handles: the pair's midpoint. Partner far off: the casualty rides with the front man, never floating in empty air
+          const mx = (s.fx + pt.fx) / 2, my = (s.fy + pt.fy) / 2;
+          const hx = s.fx - Math.cos(s.faceA) * 0.55, hy = s.fy - Math.sin(s.faceA) * 0.55;
+          c2.fx = lerp(mx, hx, w); c2.fy = lerp(my, hy, w); c2.z = s.z; }
         else { c2.fx = s.fx - Math.cos(s.faceA) * 0.55; c2.fy = s.fy - Math.sin(s.faceA) * 0.55; c2.z = s.z; }
         if (!s.path){ if (Math.hypot(c.bedTile[0] + 0.5 - s.fx, c.bedTile[1] + 0.5 - s.fy) < 1.7){ s.bearerPhase = 'unload'; s.phaseT = 1.8; }
           else goTo(s, c.bedTile[0], c.bedTile[1], { state: 'drag' }); } }
@@ -2603,8 +2621,12 @@ function updateSoldier(s, dt){
     if (s.followJob){ const f = s.followJob;
       if (f.dead || !f.carryCas){ s.followJob = null; }
       else { const d = Math.hypot(f.fx - s.fx, f.fy - s.fy);
-        if (f.bearerPhase === 'carry'){ if (s.state !== 'drag') setState(s, 'drag', 2);
-          if (d > 1.25 && !s.path) goTo(s, Math.floor(f.fx), Math.floor(f.fy), { state: 'drag' }); }
+        const stale = !s.path || Math.hypot((s.destFx || 0) - f.fx, (s.destFy || 0) - f.fy) > 2.5;
+        if (f.bearerPhase === 'carry'){
+          if (d > 3){ if (stale) goTo(s, Math.floor(f.fx), Math.floor(f.fy), { state: 'run' }); }   // fallen behind the stretcher: hurry, and aim at where the front man is now
+          else { if (s.state !== 'drag') setState(s, 'drag', 2);
+            if (d > 1.25 && !s.path) goTo(s, Math.floor(f.fx), Math.floor(f.fy), { state: 'drag' }); } }
+        else if (d > 6){ if (stale) goTo(s, Math.floor(f.fx), Math.floor(f.fy), { state: 'run' }); }
         else if (d > 1.25 && !s.path) goTo(s, Math.floor(f.fx), Math.floor(f.fy), { state: 'run' });
         return; } }
     if (sim.bearerJobs.length && s.pairPartner && !s.pairPartner.carryCas && !s.pairPartner.followJob) claimBearerJob(s);
@@ -2819,8 +2841,8 @@ function integrateRagdolls(dt){
     s.fx += r.vx * dt; s.fy += r.vy * dt;
     const fr = Math.exp(-dt * (sim.water > 3 ? 4.4 : 2.7)); r.vx *= fr; r.vy *= fr;
     r.ang += r.va * dt; r.va *= Math.exp(-dt * 3.1);
-    const t = tileAt(Math.floor(s.fx), Math.floor(s.fy));
-    if (!walkable(t, s.enemy)){ s.fx = ox; s.fy = oy; r.vx *= -0.35; r.vy *= -0.35; r.va += rr(-2, 2); }
+    const t = tileAt(Math.floor(s.fx), Math.floor(s.fy)), t0 = tileAt(Math.floor(ox), Math.floor(oy));
+    if (!walkable(t, s.enemy) || (t && t0 && Math.abs(t.z - t0.z) > 0.6)){ s.fx = ox; s.fy = oy; r.vx *= -0.35; r.vy *= -0.35; r.va += rr(-2, 2); }
     else for (const o of sim.soldiers){ if (o === s || o.gone) continue;
       const dx = s.fx - o.fx, dy = s.fy - o.fy, d = Math.hypot(dx, dy);
       if (d < 0.42 && d > 1e-4){ s.fx = o.fx + dx / d * 0.42; s.fy = o.fy + dy / d * 0.42; r.vx *= -0.3; r.vy *= -0.3; r.va *= 0.5; break; } }
@@ -2828,6 +2850,13 @@ function integrateRagdolls(dt){
     if (r.t <= 0 || (Math.abs(r.vx) + Math.abs(r.vy) < 0.05 && Math.abs(r.va) < 0.4)){
       r.t = 0; r.vx = 0; r.vy = 0; r.va = 0; r.ang = Math.round(r.ang / Math.PI) * Math.PI + rr(-0.16, 0.16); } }
 }
+function layerCross(s, nx, ny){ // would standing at (nx, ny) put him on another level? levels change by climbs, not by shoves
+  const a = tileAt(Math.floor(s.fx), Math.floor(s.fy)), b = tileAt(Math.floor(nx), Math.floor(ny));
+  return !!(a && b && Math.abs(a.z - b.z) > 0.6); }
+function slidePush(s, px, py){ // apply a shove; when the direct line crosses a level, slide along his own layer instead
+  if (!layerCross(s, s.fx + px, s.fy + py)){ s.fx += px; s.fy += py; return; }
+  if (!layerCross(s, s.fx + px, s.fy)){ s.fx += px; return; }
+  if (!layerCross(s, s.fx, s.fy + py)) s.fy += py; }
 function physicsStep(dt){
   integrateRagdolls(dt);
   const bodies = sim.soldiers.filter(s => !s.gone && !s.climbing && !s.inBed && !(s.state === 'down' && s.carriedBy));
@@ -2841,7 +2870,7 @@ function physicsStep(dt){
     for (const b of statics){ if (b.idx !== undefined && s.enemy === b.side && s.gun === b.idx) continue;
       const dx = s.fx - b.fx, dy = s.fy - b.fy, minD = bodyRadius(s) + b.r, d2 = dx * dx + dy * dy;
       if (d2 < minD * minD && d2 > 1e-6){ const d = Math.sqrt(d2), push = Math.min(0.09, minD - d);
-        s.fx += dx / d * push; s.fy += dy / d * push; } }
+        slidePush(s, dx / d * push, dy / d * push); } }
     const cx = Math.floor(s.fx), cy = Math.floor(s.fy);
     for (let gx = cx - 1; gx <= cx + 1; gx++) for (let gy = cy - 1; gy <= cy + 1; gy++){
       const cell = grid.get(gx + ',' + gy); if (!cell) continue;
@@ -2861,13 +2890,16 @@ function physicsStep(dt){
         const ps = bodyPriority(s), po = bodyPriority(o);
         if (ps > po) { ws *= 0.35; wo = 1 - ws; } else if (po > ps) { wo *= 0.35; ws = 1 - wo; }
         const cs = Math.min(0.085, overlap * ws), co = Math.min(0.085, overlap * wo);
-        s.fx -= dx * cs; s.fy -= dy * cs; o.fx += dx * co; o.fy += dy * co;
+        slidePush(s, -dx * cs, -dy * cs); slidePush(o, dx * co, dy * co);
         if (overlap > 0.09){ s.bumpT = 1; o.bumpT = 1; } } } }
   for (const s of bodies){
-    if (walkable(tileAt(Math.floor(s.fx), Math.floor(s.fy)), s.enemy)) continue;
     const [ox, oy] = startPos.get(s.id);
-    if (walkable(tileAt(Math.floor(s.fx), Math.floor(oy)), s.enemy)) s.fy = oy;
-    else if (walkable(tileAt(Math.floor(ox), Math.floor(s.fy)), s.enemy)) s.fx = ox;
+    const t0 = tileAt(Math.floor(ox), Math.floor(oy));
+    const okHere = (x, y) => { const t = tileAt(Math.floor(x), Math.floor(y));
+      return walkable(t, s.enemy) && !(t0 && t && Math.abs(t.z - t0.z) > 0.6); };
+    if (okHere(s.fx, s.fy)) continue;
+    if (okHere(s.fx, oy)) s.fy = oy;
+    else if (okHere(ox, s.fy)) s.fx = ox;
     else { s.fx = ox; s.fy = oy; } }
   const c = sim.cat;
   if (c) for (const s of bodies){ if (s.dead) continue;
