@@ -630,8 +630,9 @@ function soldierMove(s, dt){
       const d2 = rx * rx + ry * ry; if (d2 < blockD){ blockD = d2; blockO = o; } }
     if (isLast){ for (const o of sim.soldiers){ if (o === s || o.dead || o.gone) continue;
         if (Math.hypot(o.fx - s.destFx, o.fy - s.destFy) < 0.55){ lastR = 0.5; break; } }
-      if (lastR < 0.5 && sim.staticBodies) for (const b of sim.staticBodies){
-        if (Math.hypot(b.fx - s.destFx, b.fy - s.destFy) < b.r + 0.42){ lastR = 0.55; break; } } }
+      if (sim.staticBodies) for (const b of sim.staticBodies){
+        if (Math.hypot(b.fx - s.destFx, b.fy - s.destFy) < b.r + bodyRadius(s))
+          lastR = Math.max(lastR, Math.min(1.3, b.r + bodyRadius(s) + 0.08)); } }
     if (blockO){ const px = diry, py = -dirx, ox = s.fx + px * 0.36, oy = s.fy + py * 0.36;
       const anchored = blockO.state === 'watch' || blockO.state === 'sleep';
       if (walkable(tileAt(Math.floor(ox), Math.floor(oy)), s.enemy) && !layerCross(s, ox, oy)){ aimX = wx + px * 0.36; aimY = wy + py * 0.36; sq = 0.55; }
@@ -674,7 +675,7 @@ function arrive(s){
     for (let i = 0; i < 2; i++) sim.parts.push({ kind:'dirt', fx: s.fx, fy: s.fy, z: s.z, ox: rr(-3, 3), oy: 0, h: 1.2, vx: rr(-5, 5), vy: rr(-2, 2), vh: rr(8, 16), life: rr(.2, .35), t: 0, col: PAL.soilDark, r: rr(0.7, 1.1) });
   if (s.resumeDest){ const rd = s.resumeDest; s.resumeDest = null; s.stallN = 0; s.arriveAct = null;
     if (goTo(s, rd[0], rd[1], { act: rd[2] || 'idle' })) return; }
-  s.stallN = 0;
+  s.stallN = 0; s.wedgeN = 0; s.wedgeKey = null;
   const act = s.arriveAct; s.arriveAct = null;
   if (s.role === 'carrier' && s.leg){ arriveCarrier(s); return; }
   if (act === 'bow'){ s.vig = { pose: 'bow', t: rr(5, 8) * ((s.grief || 0) > 0.8 ? 2.2 : 1) }; setState(s, 'idle', 1); }
@@ -2806,7 +2807,22 @@ function updateSoldier(s, dt){
   if (s.stallT > 3){ s.stallT = 0;
     if (s.path && !s.climbing && s._lx !== undefined && Math.hypot(s.fx - s._lx, s.fy - s._ly) < 0.3){
       /* wedged on a man, a prop, a corner: first step out of the wedge, only then give the path up */
-      let stepped = false;
+      const wkey = Math.floor(s.destFx) + ',' + Math.floor(s.destFy);
+      if (s.wedgeKey === wkey) s.wedgeN = (s.wedgeN || 0) + 1; else { s.wedgeKey = wkey; s.wedgeN = 1; }
+      let stepped = false, retargeted = false;
+      if (s.wedgeN >= 3){ /* the same tile has wedged him three times: the errand moves one tile over */
+        const dgx = Math.floor(s.destFx), dgy = Math.floor(s.destFy), dtile = tileAt(dgx, dgy);
+        outer: for (let r = 1; r <= 2; r++)
+          for (let ox = -r; ox <= r; ox++) for (let oy = -r; oy <= r; oy++){
+            if (Math.max(Math.abs(ox), Math.abs(oy)) !== r || retargeted) continue;
+            const tt3 = tileAt(dgx + ox, dgy + oy);
+            if (!tt3 || !walkable(tt3, s.enemy)) continue;
+            if (dtile && tt3.z !== dtile.z) continue;
+            s.resumeDest = null; s.path = null; s.wedgeN = 0;
+            if (goTo(s, dgx + ox, dgy + oy, { act: s.arriveAct })) retargeted = true;
+            if (retargeted) break outer; }
+        if (!retargeted){ s.path = null; s.tState = Math.min(s.tState, 1.5); s.stallN = 0; } }
+      if (!retargeted){
       if (!s.stallN){ const dgx = Math.floor(s.destFx), dgy = Math.floor(s.destFy);
         const px = -Math.sin(s.faceA), py = Math.cos(s.faceA);
         const tries = [[Math.floor(s.fx + px * 0.9), Math.floor(s.fy + py * 0.9)], [Math.floor(s.fx - px * 0.9), Math.floor(s.fy - py * 0.9)],
@@ -2816,7 +2832,7 @@ function updateSoldier(s, dt){
           s.resumeDest = [dgx, dgy, s.arriveAct]; s.stallN = 1;
           if (goTo(s, tx, ty, { act: 'idle' })){ stepped = true; } else s.resumeDest = null;
           if (stepped) break; } }
-      if (!stepped){ s.path = null; s.tState = Math.min(s.tState, 1.5); s.stallN = 0; } }
+      if (!stepped){ s.path = null; s.tState = Math.min(s.tState, 1.5); s.stallN = 0; } } }
     else if (!s.path) s.stallN = 0;
     s._lx = s.fx; s._ly = s.fy; }
   const wasMoving = !!s.path;
