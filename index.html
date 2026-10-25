@@ -649,6 +649,13 @@ function arrive(s){
   const act = s.arriveAct; s.arriveAct = null;
   if (s.role === 'carrier' && s.leg){ arriveCarrier(s); return; }
   if (act === 'bow'){ s.vig = { pose: 'bow', t: rr(5, 8) }; setState(s, 'idle', 1); }
+  else if (act === 'visit'){ const f = sim.soldiers.find(x => x.id === s.visitId); s.visitId = undefined;
+    if (f && !f.dead && !f.path && !f.talk && !f.gatherId && f.state !== 'down' && f.state !== 'sleep'){ const dur = rr(14, 28);
+      s.talk = { with: f.id, t: dur }; f.talk = { with: s.id, t: dur }; f.vig = null;
+      s.bond = s.bond || {}; f.bond = f.bond || {};
+      s.bond[f.id] = Math.min(1, (s.bond[f.id] || 0) + 0.1); f.bond[s.id] = Math.min(1, (f.bond[s.id] || 0) + 0.1); }
+    else s.vig = { pose: 'cards', t: rr(5, 8) };
+    setState(s, 'idle', 1); }
   else if (act === 'post'){ setState(s, 'watch', rr(4, 8)); }
   else if (act === 'despawn'){ s.gone = true; }
   else if (act === 'bunk'){ setState(s, 'sleep', rr(20, 40)); }
@@ -1932,7 +1939,7 @@ function think(s){
   sim.__thinks = (sim.__thinks || 0) + 1;
   if (s.hx === undefined){ s.hx = Math.floor(s.fx); s.hy = Math.floor(s.fy); }
   const h = sim.hour, A = sim.map.anchors, sec = sim.map.sectors[clamp(s.sector, 0, 2)] || sim.map.sectors[1];
-  if (s.wreckJob || (s.sawJob !== undefined && s.sawJob !== null)) return;
+  if (s.wreckJob || s.gatherId || (s.sawJob !== undefined && s.sawJob !== null)) return;
   const night = h < 5.6 || h > 19.4;
   const standTo = ((h > 5.65 && h < 6.75) || (h > 18.7 && h < 19.7)) && sim.t >= (s.alertT || 0);
   const messWin = (h > 6.9 && h < 8.4) || (h > 11.9 && h < 13.1) || (h > 17.4 && h < 18.6);
@@ -2074,7 +2081,7 @@ function think(s){
   if (s.job){ const j = s.job; go((j.stand || [j.gx, j.gy])[0], (j.stand || [j.gx, j.gy])[1], {}); return; }
   if (s.trade === 'sent' && (night || rng() < 0.62)){ go(s.hx, s.hy, { act:'post', step: true, fx: 0.5, fy: 0.24 }); return; }
   sim.__genThink = (sim.__genThink || 0) + 1;
-  if (!s.job && sim.jobs.length && rng() < 0.4){ const j = sim.jobs.shift(); s.job = j; sim.__pickWin = (sim.__pickWin || 0) + 1; (sim.__assigns = sim.__assigns || []).push(s.id + ':' + s.trade + ':' + j.type + '@' + Math.round(sim.t)); go((j.stand || [j.gx, j.gy])[0], (j.stand || [j.gx, j.gy])[1], {}); return; }
+  if (!s.job && sim.jobs.length && rng() < 0.3){ const j = sim.jobs.shift(); s.job = j; sim.__pickWin = (sim.__pickWin || 0) + 1; (sim.__assigns = sim.__assigns || []).push(s.id + ':' + s.trade + ':' + j.type + '@' + Math.round(sim.t)); go((j.stand || [j.gx, j.gy])[0], (j.stand || [j.gx, j.gy])[1], {}); return; }
   const r = rng();
   if (night && r < 0.34){ for (const b of sim.map.bunkTiles){ const k = b[0] + ',' + b[1];
       if (!sim.bunkTaken.has(k)){ sim.bunkTaken.add(k); s.bunkKey = k; go(b[0], b[1], { act:'bunk' }); return; } } idle(); return; }
@@ -2082,13 +2089,13 @@ function think(s){
   else if (r < 0.48){ const t = pick(sim.trenchTiles.filter(t2 => t2[0] >= sec.x0 && t2[0] <= sec.x1)); go(t[0], t[1], { act:'post', step: rng() < 0.4, fy: 0.3 }); }
   else if (r < 0.62){ go(sec.comm, supportY(sec.comm), {}); s.vig = { pose:'repair', t: rr(4, 7) }; }
   else if (r < 0.78){ const f = sim.soldiers.find(x => x.id === s.friend && !x.dead && !x.path);
-    if (f){ go(Math.floor(f.fx) + ri(-1, 1), Math.floor(f.fy), {}); s.vig = { pose:'cards', t: rr(5, 8) }; } else idle(); }
+    if (f){ s.visitId = f.id; go(Math.floor(f.fx) + ri(-1, 1), Math.floor(f.fy), { act:'visit' }); } else idle(); }
   else { go(sec.dug[0] + 1, 22, {}); s.vig = { pose:'read', t: rr(5, 8) }; }
 }
 function directorTick(dt){
   sim.directorT -= dt; if (sim.directorT > 0) return;
   sim.directorT = rr(4, 8);
-  const free = sim.soldiers.filter(s => !s.dead && !s.enemy && !s.path && !s.vig && !s.talk && !s.job && !s.supplyJob && !s.bearerJob && !s.patrol &&
+  const free = sim.soldiers.filter(s => !s.dead && !s.enemy && !s.path && (!s.vig || s.vig.t < 4) && !s.talk && !s.job && !s.supplyJob && !s.bearerJob && !s.patrol && !s.gatherId &&
     s.state !== 'sleep' && s.state !== 'watch' && s.state !== 'down' && s.shunned <= 0);
   if (!free.length) return;
   /* conversations: two men, sometimes three, and what they know travels with the words */
@@ -2100,7 +2107,8 @@ function directorTick(dt){
       !(a.bias && a.bias[s.id] < -0.4 && !(a.bond && a.bond[s.id] > 0.2)))
     .sort((x, y) => Math.hypot(x.fx - a.fx, x.fy - a.fy) - Math.hypot(y.fx - a.fx, y.fy - a.fy))[0];
   if (near && rng() < 0.82){
-    const dur = rr(7, 16);
+    const dur = rr(14, 28);
+    a.vig = null; near.vig = null;
     a.talk = { with: near.id, t: dur }; near.talk = { with: a.id, t: dur };
     a.letterT = 0; near.letterT = 0;
     a.bond = a.bond || {}; near.bond = near.bond || {};
@@ -2119,11 +2127,13 @@ function directorTick(dt){
       else if (ev.kind === 'theft' || ev.kind === 'shame'){ to.bias = to.bias || {};
         to.bias[ev.about] = Math.max(-1, (to.bias[ev.about] || 0) - 0.3); } });
     const third = free.find(s => s !== a && s !== near && Math.hypot(s.fx - a.fx, s.fy - a.fy) < 4.5);
-    if (third && rng() < 0.4){ third.talk = { with: a.id, t: dur * 0.8 }; goTo(third, Math.floor(a.fx) + (third.fx > a.fx ? 1 : -1), Math.floor(a.fy), {}); }
+    if (third && rng() < 0.55){ third.talk = { with: a.id, t: dur * 0.8 }; third.vig = null; goTo(third, Math.floor(a.fx) + (third.fx > a.fx ? 1 : -1), Math.floor(a.fy), {});
+      const fourth = free.find(s => s !== a && s !== near && s !== third && Math.hypot(s.fx - a.fx, s.fy - a.fy) < 4.5);
+      if (fourth && rng() < 0.3){ fourth.talk = { with: a.id, t: dur * 0.7 }; fourth.vig = null; goTo(fourth, Math.floor(a.fx) + (fourth.fx > a.fx ? 1 : -1), Math.floor(a.fy), {}); } }
     return; }
   /* a man alone with a letter, or cleaning his rifle in the quiet */
   a.letterT = 0;
-  a.vig = { pose: rng() < 0.55 ? 'read' : 'clean', t: rr(7, 12) };
+  a.vig = { pose: a.mail > 0 ? 'read' : (rng() < 0.55 ? 'read' : 'clean'), t: rr(7, 12) }; if (a.mail > 0) a.mail--;
 }
 function arriveCarrier(s){
   if (s.leg === 'in'){ s.leg = 'out';
@@ -2261,7 +2271,7 @@ function wound(s, cause){
   paintScar(Math.floor(s.fx), Math.floor(s.fy), 'stain');
   if (rng() < 0.42){ killSoldier(s, cause); return; }
   startRag(s, -Math.cos(s.faceA) * rr(0.5, 1.1), -Math.sin(s.faceA) * rr(0.5, 1.1), rr(-3.5, 3.5));
-  s.state = 'down'; setState(s, 'down', 9999); s.path = null; s.vig = null; s.sawJob = undefined; s.sawReady = false; s.wreckJob = false;
+  s.state = 'down'; setState(s, 'down', 9999); s.path = null; s.vig = null; s.sawJob = undefined; s.sawReady = false; s.wreckJob = false; s.gatherId = undefined;
   s.bleedT = rr(90, 260); s.inBed = false; s.carriedBy = null; sim.woundedRef = s;
   recordSeen('wound', s.id, s.fx, s.fy, 8);
   logEvent('wound', describeMan(s) + ' is down (' + cause + ').');
@@ -2275,7 +2285,8 @@ function killSoldier(s, cause){
   const tt = tileAt(Math.floor(s.fx), Math.floor(s.fy)); if (tt) tt.stain = Math.min(1, tt.stain + 0.8);
   paintScar(Math.floor(s.fx), Math.floor(s.fy), 'stain');
   startRag(s, -Math.cos(s.faceA) * rr(0.8, 1.5), -Math.sin(s.faceA) * rr(0.8, 1.5), rr(-5, 5));
-  s.dead = true; s.state = 'down'; s.path = null; s.vig = null; s.foe = null; s.sawJob = undefined; s.sawReady = false; s.wreckJob = false;
+  s.dead = true; s.state = 'down'; s.path = null; s.vig = null; s.foe = null; s.sawJob = undefined; s.sawReady = false; s.wreckJob = false; s.gatherId = undefined;
+  sim.soldiers.forEach(o => { if (!o.dead && !o.enemy && o !== s && (o.friend === s.id || (o.bond && o.bond[s.id] > 0.3))) o.grief = Math.min(1, (o.grief || 0) + 0.5); });
   sim.corpses.push(s);
   sim.soldiers.forEach(o => { if (o.friend === s.id && !o.dead) o.grief = 1; });
   if (s.squad >= 0) sim.soldiers.forEach(o => { if (o.squad === s.squad && !o.dead) o.grief = Math.min(1, Math.max(o.grief, 0.55)); });
@@ -2689,6 +2700,13 @@ function updateSoldier(s, dt){
         s.job = null; setState(s, 'idle', rr(0.4, 1.4)); } }
     return; }
   /* supply: the carrying machine, node to node */
+  if (s.gatherId){ const G = sim.social.find(g => g.id === s.gatherId);
+    if (!G) s.gatherId = undefined;
+    else { const sp = s.gatherSlot || [G.cx, G.cy];
+      if (Math.hypot(sp[0] - s.fx, sp[1] - s.fy) > 0.85){ if (!s.path) goTo(s, Math.floor(sp[0]), Math.floor(sp[1]), {}); }
+      else { faceToward(s, G.cx, G.cy);
+        if (!s.vig || s.vig.t <= 0) s.vig = { pose: G.kind === 'cards' ? (rng() < 0.6 ? 'sit' : 'cards') : G.kind === 'rum' ? pick(['stand', 'cook', 'point']) : pick(['point', 'stand', 'cards']), t: rr(2, 4) }; }
+      return; } }
   if (s.sawJob !== undefined && s.sawJob !== null){
     if (s.dead || s.state === 'down'){ s.sawJob = undefined; s.sawReady = false; }
     else { const spot = s.sawJob === 0 ? [18.5, 46.5] : [20.5, 45.5];
@@ -3067,8 +3085,53 @@ function enemyWorksTick(dt){
     else if ((Math.floor(s.fx) !== s.hx || Math.floor(s.fy) !== s.hy) && !s.path) goTo(s, s.hx, s.hy, { enemy: true, scramble: true }); }
   if (sim.ewT <= 0) sim.ewT = 5;
 }
+function freeishMen(){ return sim.soldiers.filter(s => !s.dead && !s.enemy && !s.leg && !s.path && !s.job && !s.supplyJob && !s.bearerJob && !s.carryCas && !s.followJob &&
+  (s.sawJob === undefined || s.sawJob === null) && !s.wreckJob && !s.gatherId && !s.talk && !s.patrol && !sim.queue.includes(s.id) &&
+  s.state !== 'down' && s.state !== 'sleep' && s.state !== 'watch'); }
+let __gatherSeq = 0;
+function startGather(kind, centre, men, dur){
+  const G = { id: ++__gatherSeq, kind, cx: centre[0] + 0.5, cy: centre[1] + 0.5, t: dur, men: [], pulse: 2 };
+  const ring = [[0.85, 0.1], [-0.85, 0.35], [0.15, 0.85], [-0.3, -0.8], [1.5, 0.65], [-1.5, -0.5], [0.7, -0.75], [-0.7, 0.95], [1.15, -0.35], [-1.15, 0.15]];
+  men.forEach((m, i) => { const sp = ring[i % ring.length]; m.gatherId = G.id; m.gatherSlot = [G.cx + sp[0], G.cy + sp[1]]; G.men.push(m.id); });
+  sim.social.push(G); }
+function socialTick(dt){
+  const h = sim.hour, A = sim.map.anchors;
+  const messWin = (h > 6.9 && h < 8.4) || (h > 11.9 && h < 13.1) || (h > 17.4 && h < 18.6);
+  const standTo = (h > 5.65 && h < 6.75) || (h > 18.7 && h < 19.7);
+  for (let i = sim.social.length - 1; i >= 0; i--){ const G = sim.social[i]; G.t -= dt; G.pulse -= dt;
+    G.men = G.men.filter(id => { const m = sim.soldiers.find(x => x.id === id); return m && !m.dead && m.state !== 'down'; });
+    if (!G.assembled){ const seated = G.men.filter(id => { const m = sim.soldiers.find(x => x.id === id); const sp = m.gatherSlot || [G.cx, G.cy];
+        return Math.hypot(sp[0] - m.fx, sp[1] - m.fy) <= 1.2; }).length;
+      if (seated >= 2) G.assembled = true;
+      else { G.age = (G.age || 0) + dt; G.t += dt; if (G.age > 25) G.t = 0; } }
+    if (G.t <= 0 || G.men.length < 2 || standTo || sim.raid.active || (messWin && G.kind !== 'rum')){
+      G.men.forEach(id => { const m = sim.soldiers.find(x => x.id === id); if (!m) return;
+        if (G.kind === 'rum') m.morale = Math.min(1, m.morale + 0.06);
+        if (G.kind === 'mail' && rng() < 0.55){ m.mail = 2; m.letterT = 0; m.morale = Math.min(1, m.morale + 0.08); }
+        if (m.gatherId === G.id){ m.gatherId = undefined; if (!m.path) setState(m, 'idle', rr(0.4, 1.2)); } });
+      sim.social.splice(i, 1); continue; }
+    if (G.pulse <= 0){ G.pulse = rr(4, 7);
+      const ms = G.men.map(id => sim.soldiers.find(x => x.id === id)).filter(Boolean);
+      if (ms.length >= 2){ const a = pick(ms), b = pick(ms.filter(x => x !== a));
+        if (b){ a.bond = a.bond || {}; b.bond = b.bond || {};
+          a.bond[b.id] = Math.min(1, (a.bond[b.id] || 0) + 0.05); b.bond[a.id] = Math.min(1, (b.bond[a.id] || 0) + 0.05);
+          const newest = s2 => (s2.seen || []).filter(e => sim.t - e.t < 3000).sort((x, y) => y.t - x.t)[0];
+          [[a, b], [b, a]].forEach(([fr, to]) => { const ev = newest(fr); if (!ev) return; to.seen = to.seen || [];
+            if (to.seen.some(e => e.key === ev.key)) return; to.seen.push(ev);
+            if (ev.kind === 'death'){ if (to.friend === ev.about) to.grief = Math.min(1, (to.grief || 0) + 0.55); to.morale = Math.max(0, to.morale - 0.1); }
+            else if (ev.kind === 'good') to.morale = Math.min(1, to.morale + 0.06); }); } } } }
+  sim.socialT -= dt;
+  if (sim.socialT <= 0){ sim.socialT = rr(4, 7);
+    if (sim.social.length < 3 && h > 6.8 && h < 21.5 && !standTo && !messWin && !sim.raid.active){
+      const pool = freeishMen().filter(m => m.fy > 16);   /* anywhere on our side of the wire: gun pits and yards included */
+      if (pool.length){ const scored = pool.map(a => ({ a, near: pool.filter(m => m !== a && Math.hypot(m.fx - a.fx, m.fy - a.fy) <= 9) }))
+          .filter(x => x.near.length >= 1).sort((x, y) => y.near.length - x.near.length);
+        if (scored.length){ const { a, near } = scored[0];
+          const mates = near.sort((x, y) => Math.hypot(x.fx - a.fx, x.fy - a.fy) - Math.hypot(y.fx - a.fx, y.fy - a.fy)).slice(0, 3);
+          startGather(rng() < 0.45 ? 'cards' : 'talk', [Math.floor(a.fx), Math.floor(a.fy)], [a].concat(mates), rr(18, 36)); } } } } }
 function updateSystems(dt){
   enemyWorksTick(dt);
+  socialTick(dt);
   /* pacing: the war breathes. Stand-to hours are loud, midday is slow, night is tense and low. */
   sim.intensity ??= 0.3; sim.pulseT = Math.max(0, (sim.pulseT || 0) - dt);
   const hf = sim.hour;
@@ -3155,7 +3218,9 @@ function updateSystems(dt){
       if (sim.stocks.cook.food < 2) needs.push({ com: 'food', qty: 3, to: 'cook' });
       if (sim.stocks.aid.med < 2) needs.push({ com: 'med', qty: 2, to: 'aid' });
       if (sim.stocks.hq.cable < 1) needs.push({ com: 'cable', qty: 2, to: 'hq' });
-      for (const n of needs){ if (sim.soldiers.filter(s => s.supplyJob).length >= 5) break;
+      const labourCap = Math.max(6, Math.floor(sim.soldiers.filter(x => !x.dead && !x.enemy).length * 0.27));
+      const labourNow = () => sim.soldiers.filter(x => x.supplyJob || x.job || (x.sawJob !== undefined && x.sawJob !== null) || x.wreckJob).length;
+      for (const n of needs){ if (sim.soldiers.filter(s => s.supplyJob).length >= 5 || labourNow() >= labourCap) break;
         if ((sim.stocks.depot[n.com] || 0) < 1) continue;
         if (sim.soldiers.some(s => s.supplyJob && s.supplyJob.to === n.to && s.supplyJob.com === n.com)) continue;
         const free = sim.soldiers.filter(s => !s.dead && !s.enemy && !s.leg && !s.gone && !s.path && !s.job && !s.supplyJob && !s.wreckJob && (s.sawJob === undefined || s.sawJob === null) && !s.talk && !s.carryCas && !s.followJob && !s.patrol && !sim.queue.includes(s.id) &&
@@ -3330,8 +3395,12 @@ function updateSystems(dt){
   /* mail and rum: two small hours in the day */
   if (!sim.mailDone && hf > 11.2 && hf < 11.6){ sim.mailDone = true;
     sim.soldiers.filter(s => !s.dead && !s.enemy && s.letterT > 300).slice(0, 7).forEach(s => { s.letterT = 0; s.morale = clamp((s.morale || 0.5) + 0.1, 0, 1); });
-    logEvent('mail', 'Mail reaches the line. Men read in corners.'); }
+    logEvent('mail', 'Mail reaches the line. Men read in corners.');
+    const mcrowd = freeishMen().slice(0, 8);
+    if (mcrowd.length >= 3 && !sim.raid.active) startGather('mail', [sim.map.anchors.cook[0], sim.map.anchors.cook[1] + 2], mcrowd, rr(12, 20)); }
   if (!sim.rumDone && hf > 17 && hf < 17.4){ sim.rumDone = true;
+    const rcrowd = freeishMen().slice(0, 10);
+    if (rcrowd.length >= 3 && !sim.raid.active) startGather('rum', [sim.map.anchors.cook[0], sim.map.anchors.cook[1] + 2], rcrowd, rr(15, 24));
     sim.soldiers.filter(s => !s.dead && !s.enemy).forEach(s => s.morale = clamp((s.morale || 0.5) + 0.05, 0, 1));
     sim.soldiers.forEach(s => { if (!s.dead && !s.enemy) s.nerves = Math.min(1, (s.nerves ?? 0.8) + 0.03); });
     logEvent('rum', 'The rum call goes round before stand-to.'); }
@@ -3921,6 +3990,7 @@ function newSim(planetName, seedStr){
     missionQ: [], emMissionQ: [], dramaT: rr(26, 44), orderT: rr(50, 90), logisticsT: 4, batteryT: 2, talkT: 6,
     cart: { active: false, fx: -6, dir: 1, t: rr(24, 44), phase: 'gone', cargo: null, vCur: 0 },
     saw: { active: false, pair: [], t: 0, stroke: 0 },
+    social: [], socialT: 5, rumDay: -1, mailT: 260,
     plane: { active: false, fx: -8, fy: 8 },
     drops: [], crates: [], hulks: [],
     stocks: { depot: { food: 14, ammo: 26, shells: 34, timber: 16, logs: 4, water: 20, oil: 6, med: 6, cable: 5 },
