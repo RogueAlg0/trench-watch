@@ -2425,7 +2425,7 @@ function arriveCarrier(s){
       logEvent('arrival', 'A replacement reaches the line and is claimed.');
       setState(s, 'idle', 1); return; }
     const D = sim.stocks.depot; D.food += 3; D.ammo += 4; D.shells += 3; D.timber += 3; D.water += 3;
-    goTo(s, 93, 50, { act: 'despawn' }); setState(s, 'carry', 150);
+    goTo(s, 91, 50, { act: 'despawn' }); setState(s, 'carry', 150);
   } else s.gone = true;
 }
 
@@ -4162,7 +4162,7 @@ function update(dt){
   sim.worksT = (sim.worksT ?? 25) - dt; if (sim.worksT <= 0){ sim.worksT = 20; worksTick(); }
   sim.supplyT -= dt;
   if (sim.supplyT <= 0){ sim.supplyT = rr(90, 150);
-    const c = makeSoldier('carrier', [93, 50.5]); c.leg = 'in'; c.clean = 1;
+    const c = makeSoldier('carrier', [91, 50.5]); c.leg = 'in'; c.clean = 1;
     if (sim.pendingRookie){ c.rookie = true; sim.rookieGreeter = sim.pendingRookie; sim.pendingRookie = 0; }
     sim.soldiers.push(c); goTo(c, 15, 41, { state: 'carry' }); setState(c, 'carry', 150); }
   updateGunFx(dt);
