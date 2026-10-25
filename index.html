@@ -2367,7 +2367,7 @@ function updateClimate(dt){
   if (sim.hour < 5.4 || sim.hour > 19.2) simLight = 0;
   moonCyc = (((sim.t / DAY_LEN) + (sim.moonOff || 0)) % 29.5) / 29.5;
   moonI = 0.5 - 0.5 * Math.cos(moonCyc * 6.2832);
-  moonLight = moonI * 0.34 * (1 - simLight);
+  moonLight = moonI * 0.42 * (1 - simLight);
   const dayWarm = sim.season === 'hot' ? 15 : sim.season === 'cold' ? 1.5 : 8.5;
   const target = dayWarm + simLight * 7 - (simLight === 0 ? 4.5 : 0);
   sim.temp += (target - sim.temp) * dt * 0.008;
@@ -3535,7 +3535,7 @@ function draw(){
     const my = (i * 97.7 + Math.sin(perfT * 0.23 + i * 1.7) * 22 + perfT * (i % 3)) % (VH + 30) - 15;
     ctx.fillRect(mx, my, i % 4 === 0 ? 2 : 1.2, i % 4 === 0 ? 2 : 1.2); }
   /* lighting: lamps burn oil, and a node with no oil goes dark */
-  const dark = (1 - simLight) * 0.66 * (1 - moonLight * 1.55);
+  const dark = (1 - simLight) * 0.5 * (1 - moonLight * 1.55);
   if (dark > 0.02){ LC.width = VW >> 1; LC.height = VH >> 1;
     lctx.clearRect(0, 0, LC.width, LC.height);
     lctx.fillStyle = `rgba(6,8,20,${dark})`; lctx.fillRect(0, 0, LC.width, LC.height);
@@ -3551,6 +3551,7 @@ function draw(){
     lampAt(sim.stocks.depot, 15, 43, 0, 85, 0.8);
     lampAt(sim.stocks.battery, 29, 46, -0.5, 90, 0.8);
     sim.map.sectors.forEach((sec, i) => lampAt(sim.stocks.sectors[i], sec.dug[0] + 1.5, 23, -1, 80, 0.85));
+    sim.map.sectors.forEach((sec, i) => lampAt(sim.stocks.sectors[i], sec.comm + 0.5, trenchY(sec.comm) + 0.5, -1, 82, 0.82));
     lampAt(sim.stocks.hq, 31, 32.5, -1, 75, 0.8);
     sim.parts.forEach(p => { if (p.kind === 'flare') hole(p.fx, p.fy, p.h / ZH, 195, 0.95); });
     sim.lights.forEach(L => hole(L.fx, L.fy, L.z, L.r, 0.95 * (1 - L.t / L.ttl)));
