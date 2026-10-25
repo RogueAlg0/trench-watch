@@ -612,6 +612,11 @@ function soldierMove(s, dt){
               s.state === 'drag' ? 0.34 : s.enemy ? 0.52 : s.speed) * (s.enemy ? 1 : (sim.speedK || 1));
   const tileHere = tileAt(Math.floor(s.fx), Math.floor(s.fy));
   if (tileHere && tileHere.rubble > 0.3) sp *= 0.55;                       // rubble is slow going
+  if (s.snagT > 0) s.snagT -= dt;
+  const wireHere = tileHere && sim.wireSet && sim.wireSet.has(tileHere.gx + ',' + tileHere.gy);
+  if (wireHere){ sp *= 0.38; s.trudge = 0.35;                              // wire: pick through it strand by strand
+    if (!(s.snagT > 0) && rng() < dt * 0.5){ s.snagT = rr(0.35, 0.7); s.bumpT = 2; } }
+  if (s.snagT > 0) sp *= 0.15;
   if (tileHere && tileHere.boards && sim.water > 2.5) sp *= 1.18;          // boards beat mud
   if (s.stance === 'crouch') sp *= 0.72;                                   // a crouch is careful, not quick
   if ((s.fat || 0) > 0.85) sp *= 0.62;                                      // winded: the legs go first
@@ -1473,7 +1478,7 @@ function drawMan(s){
     ctx.drawImage(sh, -23, -64, 46, 64); ctx.restore(); ctx.globalAlpha = 1; }
   /* weight: a dip at each footfall, a dip to start, a settle on stopping, the pack a beat behind */
   const heavy = (s.state === 'carry' || pose === 'carryShell' || pose === 'barrel') ? 1.5 : 1;
-  const bobY = s.path ? (Math.abs(Math.sin(s.phase)) - 0.5) * -1.9 * heavy
+  const bobY = s.path ? (Math.abs(Math.sin(s.phase)) - 0.5) * -1.9 * heavy * (1 + (s.trudge || 0) * 2.4)
                       : Math.sin(perfT * 1.25 + s.id * 1.7) * 0.12;
   const settle = s.settleT ? Math.max(0, 1 - (perfT - s.settleT) / 0.3) : 0;
   const antic = s.moveStartT ? Math.max(0, 1 - (perfT - s.moveStartT) / 0.22) : 0;
@@ -1525,6 +1530,7 @@ function buildProps(){
   sim.map.hatchTiles.forEach(([gx, gy]) => P.push({ kind:'hatch', fx: gx + 0.5, fy: gy + 0.5, z: 0 }));
   [[46.5, 36.95], [18.5, 38.95], [74.5, 35.95]].forEach(([fx, fy]) => P.push({ kind:'ladder', fx, fy, z: 0 }));
   sim.map.wire.forEach(([gx, gy]) => { if (hash2(gx, gy) < 0.75) P.push({ kind:'wire', fx: gx + 0.5, fy: gy + 0.5, z: 0 }); });
+  sim.wireSet = new Set(sim.map.wire.map(w => w[0] + ',' + w[1]));
   [[7, 10], [30, 14], [55, 9], [80, 15], [22, 44], [64, 44], [38, 47]].forEach(([gx, gy]) => P.push({ kind:'mast', fx: gx + 0.5, fy: gy + 0.5, z: 0 }));
   // building walls and roofs: aid, cookhouse, depot shed
   for (let gx = 70; gx <= 76; gx++) P.push({ kind:'wallseg', fx: gx + 0.5, fy: 36.92, z: 0 });
@@ -1735,15 +1741,105 @@ function drawDrop(dr){
   ctx.beginPath(); ctx.moveTo(gx2 - 13, cy - 25); ctx.lineTo(gx2 - 5, cy - 8); ctx.moveTo(gx2 + 13, cy - 25); ctx.lineTo(gx2 + 5, cy - 8); ctx.moveTo(gx2, cy - 27); ctx.lineTo(gx2, cy - 8); ctx.stroke();
   ctx.fillStyle = '#ddd6c4'; ctx.beginPath(); ctx.ellipse(gx2, cy - 26, 15, 6.5, 0, 0, 6.29); ctx.fill();
   ctx.fillStyle = 'rgba(120,110,90,.5)'; ctx.beginPath(); ctx.ellipse(gx2, cy - 24.5, 15, 5, 0, 0, 3.14); ctx.fill(); }
+
+/* ================= the planes (the sheet, baked in the prop language) ================= */
+function plShades(hex){ const n = parseInt(hex.slice(1), 16), r = n >> 16 & 255, g = n >> 8 & 255, b = n & 255;
+  const f = k => [Math.min(255, r * k), Math.min(255, g * k), Math.min(255, b * k)]; return [f(1.28), f(1.0), f(0.66)]; }
+const PLN_PAL = {};
+{ const mats = { alloy:'#62655a', wax:'#7a6a4e', brass:'#9a7f4a', rust:'#7a4a2e', stone:'#8b8d88', paper:'#ddd6c4',
+    glass:'#46565e', dust:'#97835f', ember:'#c96f2e', teal:'#3f6f66', bone:'#cfc4a4', dark:'#2c2c26' };
+  for (const k in mats) PLN_PAL[k] = plShades(mats[k]); }
+function plArt(W, H, seed, fn){
+  const noise = (x, y) => { const v = Math.sin(x * 12.9898 + y * 78.233 + seed * 3.7) * 43758.5453; return v - Math.floor(v); };
+  const g = Array.from({ length: H }, () => new Array(W).fill(null));
+  const set = (x, y, m, tone) => { x = Math.round(x); y = Math.round(y); if (x >= 0 && x < W && y >= 0 && y < H) g[y][x] = { m, tone: tone ?? 1 }; };
+  const blob = (cx, cy, rx, ry, m, tone) => { for (let y = Math.floor(cy - ry - 1); y <= cy + ry + 1; y++) for (let x = Math.floor(cx - rx - 1); x <= cx + rx + 1; x++){
+    const d = ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2;
+    if (d < 1 + (noise(x, y) - 0.5) * 0.55) set(x, y, m, tone ?? ((x - cx) / rx * 0.5 - (y - cy) / ry * 0.35 > 0.25 ? 0 : (x - cx) / rx < -0.5 ? 2 : 1)); } };
+  const line = (x0, y0, x1, y1, w, m, tone) => { const steps = Math.ceil(Math.hypot(x1 - x0, y1 - y0) * 2);
+    for (let i = 0; i <= steps; i++) blob(x0 + (x1 - x0) * i / steps, y0 + (y1 - y0) * i / steps, w / 2, w / 2, m, tone); };
+  const rect = (x0, y0, x1, y1, m, tone) => { for (let y = Math.round(y0); y <= y1; y++) for (let x = Math.round(x0); x <= x1; x++) set(x, y, m, tone); };
+  fn({ set, blob, line, rect });
+  const out = document.createElement('canvas'); out.width = W; out.height = H;
+  const c2 = out.getContext('2d'), img = c2.createImageData(W, H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++){ const cell = g[y][x]; if (!cell) continue;
+    let tone = cell.tone; const nz = noise(x * 1.7, y * 1.3);
+    if (nz > 0.86) tone = Math.max(0, tone - 1); else if (nz < 0.1) tone = Math.min(2, tone + 1);
+    const rgb = PLN_PAL[cell.m][tone];
+    const gr = 0.92 + noise(x * 3.1, y * 2.7) * 0.16;
+    const i = (y * W + x) * 4; img.data[i] = rgb[0] * gr; img.data[i + 1] = rgb[1] * gr; img.data[i + 2] = rgb[2] * gr; img.data[i + 3] = 255; }
+  c2.putImageData(img, 0, 0); return out; }
+function plBake(kind, bank, prop, flap){
+  return plArt(132, 64, 7100 + bank * 13 + prop * 7 + flap * 3, T => {
+    const { blob, line, rect, set } = T;
+    const cy = 30 + bank * 1.5, wingLift = bank * 5;
+    if (kind === 'sparrow'){
+      line(62, cy - 2, 26, 6 - wingLift * 0.4, 5.5, 'wax', 2);
+      line(62, cy - 2, 30, 9 - wingLift * 0.4, 2, 'brass', 1);
+      line(18, cy + 2, 6, cy - 6, 3.4, 'wax', 1); line(18, cy + 2, 8, cy + 10, 3, 'wax', 2);
+      rect(14, cy - 8, 17, cy - 2, 'ember', 1);
+      blob(58, cy + 2, 44, 4.6, 'wax', 1);
+      blob(96, cy + 1, 15, 4.4, 'alloy', 1);
+      blob(30, cy + 2, 16, 3.6, 'wax', 2);
+      line(64, cy + 3, 96, 52 + wingLift, flap ? 6.4 : 5.5, 'wax', flap ? 2 : 1);
+      line(64, cy + 3, 92, 48 + wingLift, 1.8, 'brass', 1);
+      line(74, cy + 2, 88, 44 + wingLift, 1.1, 'dark', 1); line(56, cy + 2, 44, 12 - wingLift * 0.4, 1.1, 'dark', 1);
+      blob(66, cy - 2, 5.5, 2.6, 'dark', 2); blob(65, cy - 3, 2.2, 2, 'dust', 1);
+      blob(44, cy - 1, 6, 2, 'dust', 1); blob(84, cy + 4, 5, 1.8, 'dust', 2); blob(28, 12, 3.4, 1.4, 'dust', 2);
+    } else if (kind === 'heron'){
+      line(64, cy - 2, 16, 4 - wingLift * 0.4, 4.6, 'stone', 2);
+      line(20, cy + 1, 8, cy - 4, 2.8, 'stone', 1); line(20, cy + 1, 10, cy + 8, 2.6, 'stone', 2);
+      blob(60, cy + 2, 46, 3.8, 'stone', 1);
+      blob(98, cy + 1, 13, 3.8, 'alloy', 1);
+      blob(28, cy + 2, 18, 3, 'stone', 2);
+      line(66, cy + 3, 108, 54 + wingLift, flap ? 5.6 : 4.8, 'stone', flap ? 2 : 1);
+      rect(58, cy - 1, 88, cy, 'teal', 2);
+      blob(72, cy - 2.4, 6.5, 2.6, 'glass', 0);
+      blob(72, cy - 3, 3, 1.2, 'glass', 1);
+      blob(50, cy, 5, 1.6, 'dust', 1); blob(90, cy + 3, 4, 1.4, 'dust', 2);
+    } else {
+      line(60, cy - 1, 30, 12 - wingLift * 0.4, 6, 'rust', 2);
+      line(18, cy + 2, 8, cy - 7, 3.6, 'rust', 1); line(18, cy + 2, 10, cy + 10, 3.2, 'rust', 2);
+      blob(56, cy + 2, 42, 5.6, 'rust', 1);
+      blob(94, cy + 1, 16, 5.6, 'brass', 1);
+      blob(96, cy + 1, 10, 4.4, 'alloy', 2);
+      blob(28, cy + 2, 15, 4.4, 'rust', 2);
+      line(62, cy + 4, 90, 50 + wingLift, flap ? 7 : 6, 'rust', flap ? 2 : 1);
+      blob(70, cy - 2.6, 6, 2.8, 'glass', 0);
+      blob(46, cy - 1, 7, 2.2, 'dust', 1); blob(80, cy + 5, 6, 2, 'dust', 2); blob(34, cy + 4, 4, 1.8, 'alloy', 1);
+      rect(100, cy - 3, 103, cy + 4, 'dark', 2);
+    }
+    const nx = kind === 'crow' ? 112 : 110, ny = cy + 1;
+    if (prop === 0){ line(nx, ny - 11, nx, ny + 11, 2.2, 'dark', 1); blob(nx, ny, 2.4, 2.4, 'brass', 0); }
+    else if (prop === 1){ line(nx - 8, ny - 8, nx + 8, ny + 8, 2.2, 'dark', 1); line(nx + 8, ny - 8, nx - 8, ny + 8, 1.2, 'dark', 2); blob(nx, ny, 2.4, 2.4, 'brass', 0); }
+    else { for (let a = 0; a < 22; a++){ const t = a / 22 * 6.283; if (a % 2) set(nx + Math.cos(t) * 2.2, ny + Math.sin(t) * 11, 'dark', 2); }
+      line(nx, ny - 11, nx, ny + 11, 1, 'dark', 2); blob(nx, ny, 2.4, 2.4, 'brass', 0); }
+  }); }
+const PLSPR = {};
+for (const kind of ['sparrow', 'heron', 'crow']) for (const pose of ['level', 'bankL', 'bankR', 'flaps'])
+  PLSPR[kind + ':' + pose] = [0, 1, 2].map(p => plBake(kind, pose === 'bankL' ? -1 : pose === 'bankR' ? 1 : 0, p, pose === 'flaps' ? 1 : 0));
+function plShadowSpr(scale){
+  const c = document.createElement('canvas'); c.width = 132; c.height = 64;
+  const x = c.getContext('2d'); x.fillStyle = 'rgba(12,11,8,0.32)';
+  x.beginPath(); x.ellipse(66, 34, 46 * scale, 10 * scale, 0.32, 0, 6.29); x.fill();
+  x.fillStyle = 'rgba(12,11,8,0.18)';
+  x.beginPath(); x.ellipse(66, 34, 58 * scale, 14 * scale, 0.32, 0, 6.29); x.fill();
+  return c; }
+const PLSHAD = [plShadowSpr(0.8), plShadowSpr(1.0), plShadowSpr(1.2)];
+
 function drawPlaneShadow(){
-  const pl = sim.plane, sx = isoX(pl.fx, pl.fy), sy = isoY(pl.fx, pl.fy, 0);
-  ctx.fillStyle = 'rgba(10,10,8,.20)'; ctx.beginPath(); ctx.ellipse(sx, sy, 30, 7, 0.35, 0, 6.29); ctx.fill(); }
+  const pl = sim.plane, alt = pl.alt ?? 0.5;
+  const shx = pl.fx + 2.4 * (0.4 + alt), shy = pl.fy + 1.7 * (0.4 + alt);
+  const sx = isoX(shx, shy), sy = isoY(shx, shy, 0);
+  const spr = PLSHAD[alt < 0.33 ? 0 : alt < 0.66 ? 1 : 2], sc = 1.25 - alt * 0.45;
+  ctx.save(); ctx.globalAlpha = 0.95 - alt * 0.4; ctx.translate(sx, sy); ctx.scale(sc, sc);
+  ctx.drawImage(spr, -66, -32); ctx.restore(); }
 function drawPlane(){
-  const pl = sim.plane, sx = isoX(pl.fx, pl.fy), sy = isoY(pl.fx, pl.fy, 0) - 175;
-  ctx.fillStyle = 'rgba(24,26,30,.88)';
-  ctx.beginPath(); ctx.ellipse(sx, sy, 26, 4.6, 0.35, 0, 6.29); ctx.fill();
-  ctx.beginPath(); ctx.moveTo(sx - 4, sy - 2); ctx.lineTo(sx + 16, sy + 12); ctx.lineTo(sx + 22, sy + 10); ctx.lineTo(sx + 4, sy - 4); ctx.closePath(); ctx.fill();
-  ctx.beginPath(); ctx.moveTo(sx - 22, sy - 8); ctx.lineTo(sx - 27, sy - 1); ctx.lineTo(sx - 20, sy + 1); ctx.closePath(); ctx.fill(); }
+  const pl = sim.plane, alt = pl.alt ?? 0.5, sx = isoX(pl.fx, pl.fy), sy = isoY(pl.fx, pl.fy, 0) - (105 + alt * 95);
+  const pose = pl.flap ? 'flaps' : pl.bank < -0.25 ? 'bankL' : pl.bank > 0.25 ? 'bankR' : 'level';
+  const sprs = PLSPR[(pl.kind || 'sparrow') + ':' + pose];
+  const spr = sprs[((Math.floor(perfT * 16) % 3) + 3) % 3], sc = 1.3 - alt * 0.4;
+  ctx.save(); ctx.translate(sx, sy); ctx.scale(sc, sc); ctx.drawImage(spr, -66, -32); ctx.restore(); }
 function drawCart(){
   const c = sim.cart; if (!c.active && c.fx < -8) return;
   const sx = isoX(c.fx, 50.5), sy = isoY(c.fx, 50.5, 0);
@@ -1921,20 +2017,20 @@ function drawProp(p){
     const [dw, dh, lift] = PROP_DRAW[kind];
     ctx.fillStyle = 'rgba(0,0,0,.22)'; ctx.beginPath(); ctx.ellipse(sx + (dx || 0), sy + 1, dw * 0.36, dw * 0.13, 0, 0, 6.29); ctx.fill();
     ctx.drawImage(spr, Math.round(sx + (dx || 0) - dw / 2), Math.round(sy + (dy || 0) - dh + lift)); };
-  if (p.kind === 'pot'){ put('pot', 0, Math.floor(perfT * 1.7) % 2, 0, 0);
+  if (p.kind === 'pot'){ put('pot', 0, ((Math.floor(perfT * 1.7) % 2) + 2) % 2, 0, 0);
     if (sim.stocks.cook.food > 0.2 && rng() < 0.14) sim.parts.push({ kind:'steam', fx: p.fx, fy: p.fy, z: 0.4, ox: 0, h: 12, vh: rr(9, 15), life: rr(.8, 1.5), t: 0, col:'200,200,196', r: rr(1.6, 2.8) }); }
   else if (p.kind === 'stove'){ put('stove', 0, 0, 0, 0);
     if (sim.stocks.cook.food > 0.2 && rng() < 0.2) sim.parts.push({ kind:'steam', fx: p.fx, fy: p.fy, z: 0.9, ox: 5, h: 28, vh: rr(10, 16), life: rr(1, 1.8), t: 0, col:'150,148,142', r: rr(2, 3.4) });
     if (rng() < 0.045 && canSpawn()) sim.parts.push({ kind:'spark', fx: p.fx, fy: p.fy, z: 0.4, ox: 2, oy: 0, h: 12,
       vx: rr(-2, 3), vy: rr(-1, 1), vh: rr(16, 30), life: rr(.7, 1.4), t: 0, col: '#ff9a3e' }); }
-  else if (p.kind === 'pump') put('pump', 0, Math.floor(perfT * 0.8) % 2, 0, 0);
+  else if (p.kind === 'pump') put('pump', 0, ((Math.floor(perfT * 0.8) % 2) + 2) % 2, 0, 0);
   else if (p.kind === 'phone') put('phone', 0, 0, 0, 0);
   else if (p.kind === 'table') put('table', 0, 0, 0, 0);
   else if (p.kind === 'crossAid') put('crossAid', 0, 0, 0, 0);
-  else if (p.kind === 'banner') put('banner', 0, Math.floor(perfT * 2.4) % 3, 0, 0);
+  else if (p.kind === 'banner') put('banner', 0, ((Math.floor(perfT * 2.4) % 3) + 3) % 3, 0, 0);
   else if (p.kind === 'flagBig' || p.kind === 'flagEnemy' || p.kind === 'flagSec' || p.kind === 'flagAid'){
     const wind = sim.rain > 0.35 ? 2 : (Math.sin(perfT * 0.13) > -0.2 ? 1 : 0);
-    const phase = Math.floor(perfT * (wind === 2 ? 7 : wind === 1 ? 4 : 1.6)) % 3;
+    const phase = ((Math.floor(perfT * (wind === 2 ? 7 : wind === 1 ? 4 : 1.6)) % 3) + 3) % 3;
     const v = p.kind === 'flagSec' ? (p.emblem || 0) * 3 + wind : wind;
     put(p.kind, v, phase, 0, 0); }
   else if (p.kind === 'vane'){ const spr = propSprite('vane', 0, 0); const [dw, dh] = PROP_DRAW.vane;
@@ -2685,6 +2781,7 @@ function updateSoldier(s, dt){
       if (done.pose === 'clean' && s.rifle) s.rifle.foul = done.full ? 0.02 : Math.max(0, s.rifle.foul - 0.25); } }
   s.duck = Math.max(0, s.duck - dt); s.clean = Math.max(0, (s.clean || 0) - dt);
   s.kickT = Math.max(0, (s.kickT || 0) - dt * 5.2); s.flinchT = Math.max(0, (s.flinchT || 0) - dt * 2.4); s.lungeT = Math.max(0, (s.lungeT || 0) - dt * 4.2);
+  s.trudge = Math.max(0, (s.trudge || 0) - dt);
   s.bumpT = Math.max(0, (s.bumpT || 0) - dt * 3);
   /* stance: how the body rides. Flags, fire and posts drive it; the body eases between. */
   s.proneT = Math.max(0, (s.proneT || 0) - dt);
@@ -2694,6 +2791,7 @@ function updateSoldier(s, dt){
   else if (s.proneT > 0) wantStance = 'prone';
   else if (s.patrol && sim.patrol && sim.patrol.phase === 'listen') wantStance = 'prone';
   else if (s.crouch) wantStance = 'crouch';
+  else if ((s.trudge || 0) > 0) wantStance = 'crouch';
   else if ((s.duck || 0) > 0.35) wantStance = 'crouch';
   else if (s.state === 'watch' && s.kneelPost) wantStance = 'kneel';
   s.stance = wantStance;
@@ -3608,7 +3706,8 @@ function updateSystems(dt){
     else if (g.cycle === 'serve' && g.ct <= 0){ g.stage++;
       if (g.stage > 3){ const m = sim.missionQ[0];
         if (m){ const d = Math.hypot(m.tx - g.fx, m.ty - g.fy);
-          sim.parts.push({ kind: 'shell', fx: g.fx, fy: g.fy - 1, tx: m.tx + rr(-1.6, 1.6), ty: m.ty + rr(-1, 1), z: -1, p: 0, t: 0, dur: clamp(d * 0.055, 1.6, 4.4) });
+          const spotK = sim.t < (sim.spotT || 0) ? 0.45 : 1;
+          sim.parts.push({ kind: 'shell', fx: g.fx, fy: g.fy - 1, tx: m.tx + rr(-1.6, 1.6) * spotK, ty: m.ty + rr(-1, 1) * spotK, z: -1, p: 0, t: 0, dur: clamp(d * 0.055, 1.6, 4.4) });
           m.rounds--; if (m.rounds <= 0) sim.missionQ.shift();
           if (rng() < 0.3) logEvent('battery', 'The guns fire on the far line.'); }
         g.ammo--; fireGun(g); g.cycle = 'idle'; g.ct = rr(5, 11); }
@@ -3691,9 +3790,26 @@ function updateSystems(dt){
   /* air visitors: a slow eye some mornings; now and then a gift falls out of the sky (4.7) */
   const pl = sim.plane;
   sim.planeT = (sim.planeT ?? rr(140, 260)) - dt;
-  if (!pl.active && sim.planeT <= 0){ if (sim.hour > 6.4 && sim.hour < 11.2){ pl.active = true; pl.fx = -8; pl.fy = rr(4, 14); }
+    if (!pl.active && sim.planeT <= 0){ if (sim.hour > 6.4 && sim.hour < 11.2){ pl.active = true; pl.fx = -8; pl.base = rr(5, 11); pl.fy = pl.base; pl.ph = rr(0, 6.28); pl.alt = 0.5; pl.bank = 0;
+      pl.kind = ['sparrow', 'heron', 'crow'][kgHash((sim.seedStr || 'war') + '|plane|' + Math.floor(sim.t / 130)) % 3]; }
     else sim.planeT = 45; }
-  if (pl.active){ pl.fx += 4.1 * dt; pl.fy += 1.15 * dt; if (pl.fx > 102){ pl.active = false; sim.planeT = rr(180, 420); } }
+  if (pl.active){ const prevY = pl.fy;
+    pl.fx += 4.1 * dt;
+    pl.base = pl.base ?? 9; pl.ph = pl.ph ?? rr(0, 6.28);
+    pl.fy = pl.base + Math.sin(pl.fx * 0.045 + pl.ph) * 3.1 + pl.fx * 0.028;
+    pl.bank = clamp(((pl.fy - prevY) / Math.max(dt, 0.001)) * 0.24, -1, 1);
+    pl.alt = 0.5 + 0.5 * Math.sin(pl.fx * 0.03 + pl.ph * 2);
+    pl.flap = pl.alt < 0.28 && pl.fx > 20 && pl.fx < 74;
+    /* the shadow crosses a man in the open: he flattens for a breath */
+    const shx = pl.fx + 2.4 * (0.4 + pl.alt), shy = pl.fy + 1.7 * (0.4 + pl.alt);
+    for (const s of sim.soldiers){ if (s.dead || s.state === 'down' || s.state === 'sleep' || s.inBed) continue;
+      if (Math.abs(s.fx - shx) < 2.1 && Math.abs(s.fy - shy) < 2.1){
+        const tt = tileAt(Math.floor(s.fx), Math.floor(s.fy));
+        if (tt && tt.type !== 'dug' && tt.type !== 'floor') s.duck = Math.max(s.duck || 0, 0.45); } }
+    if (rng() < dt * 7) sim.parts.push({ kind: 'steam', fx: pl.fx - 1.4, fy: pl.fy, z: 5.2 + pl.alt * 2.4, ox: 0, h: 10, vh: rr(2, 5), life: rr(.5, .9), t: 0, col: '150,146,138', r: rr(1.6, 2.6) });
+    if (pl.fx > 102){ pl.active = false; sim.planeT = rr(180, 420);
+      sim.spotT = sim.t + rr(500, 800);
+      logEvent('report', 'The ' + (pl.kind || 'spotter') + ' has been over the far line. The battery shoots truer for a while.'); } }
   sim.dropT = (sim.dropT ?? rr(320, 560)) - dt;
   if (sim.dropT <= 0){ sim.dropT = rr(340, 640);
     if (sim.hour > 6.8 && sim.hour < 17.5){ for (let i = 0; i < 3; i++) sim.drops.push({ fx: rr(14, 78), fy: rr(38, 47), h: rr(230, 300), sway: rr(0, 6.28) });
@@ -4233,7 +4349,7 @@ function draw(){
       g.addColorStop(0, `rgba(0,0,0,${Math.min(1, str * f)})`); g.addColorStop(0.42, `rgba(0,0,0,${(str * f * 0.52).toFixed(3)})`); g.addColorStop(1, 'rgba(0,0,0,0)');
       lctx.fillStyle = g; lctx.fillRect(cx - R * 1.5, cy - R * 1.5, R * 3, R * 3); }
     lctx.globalCompositeOperation = 'source-over';
-    const gn = GRAINS[((perfT * 2) | 0) % 3]; lctx.globalAlpha = 0.1 + dark * 0.12;
+    const gn = GRAINS[(((perfT * 2) | 0) % 3 + 3) % 3]; lctx.globalAlpha = 0.1 + dark * 0.12;
     const gox = ((perfT * 29) | 0) % 128, goy = ((perfT * 17) | 0) % 128;
     for (let px = -gox; px < LC.width; px += 128) for (let py = -goy; py < LC.height; py += 128) lctx.drawImage(gn, px, py);
     lctx.globalAlpha = 1;
