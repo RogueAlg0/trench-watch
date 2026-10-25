@@ -339,6 +339,11 @@ function paintWallTexture(x1, y1, x2, y2, x3, y3, x4, y4, key){
   gr.addColorStop(0, 'rgba(24,17,10,.12)'); gr.addColorStop(1, 'rgba(6,4,2,.44)');
   poly([[x1, y1], [x2, y2], [x3, y3], [x4, y4]], gr);
   poly([[x1, y1], [x2, y2], [x3, y3], [x4, y4]], 'rgba(48,36,20,.24)');
+  const GR = mulberry32(((key * 977) | 0) >>> 0 || 1);
+  for (let i = 0; i < 5; i++){ const u = GR(), v = GR();
+    const px3 = lerp(lerp(x1, x2, u), lerp(x4, x3, u), v), py3 = lerp(lerp(y1, y2, u), lerp(y4, y3, u), v);
+    ctx.fillStyle = 'rgba(8,6,3,' + (0.05 + GR() * 0.08).toFixed(2) + ')';
+    ctx.beginPath(); ctx.ellipse(px3, py3, 4 + GR() * 9, 2 + GR() * 4, 0, 0, 6.29); ctx.fill(); }
 }
 function drawNearFace(f){
   const A = [isoX(f.gx, f.gy + 1), isoY(f.gx, f.gy + 1, 0)], B = [isoX(f.gx + 1, f.gy + 1), isoY(f.gx + 1, f.gy + 1, 0)];
@@ -348,11 +353,23 @@ function drawNearFace(f){
   ctx.beginPath(); ctx.moveTo(A[0], A[1]); ctx.lineTo(B[0], B[1]);
   ctx.lineTo(lerp(B[0], B2[0], 0.34), lerp(B[1], B2[1], 0.34)); ctx.lineTo(lerp(A[0], A2[0], 0.34), lerp(A[1], A2[1], 0.34));
   ctx.closePath(); ctx.fill();
-  ctx.strokeStyle = 'rgba(110,86,54,.55)'; ctx.lineWidth = 1.4;
-  [0.4, 0.74].forEach(k => { ctx.beginPath();
+  [[0.3, 0.07], [0.2, 0.15], [0.1, 0.26]].forEach(([d, a]) => {
+    const C = [isoX(f.gx, f.gy + 1 - d), isoY(f.gx, f.gy + 1 - d, f.z)], D = [isoX(f.gx + 1, f.gy + 1 - d), isoY(f.gx + 1, f.gy + 1 - d, f.z)];
+    ctx.fillStyle = 'rgba(5,4,2,' + a + ')';
+    ctx.beginPath(); ctx.moveTo(A2[0], A2[1]); ctx.lineTo(B2[0], B2[1]); ctx.lineTo(D[0], D[1]); ctx.lineTo(C[0], C[1]); ctx.closePath(); ctx.fill(); });
+  const h1 = hash2(f.gx * 3.1 + 40, f.gy * 7.7), h2 = hash2(f.gx * 1.3, f.gy * 5.9 + 8), h3 = hash2(f.gx * 9.4, f.gy * 2.2 + 3);
+  ctx.strokeStyle = 'rgba(110,86,54,.55)'; ctx.lineWidth = 1.2 + h1 * 0.5;
+  [0.33 + h1 * 0.13, 0.63 + h2 * 0.15].forEach(k => { ctx.beginPath();
     ctx.moveTo(lerp(A[0], A2[0], k), lerp(A[1], A2[1], k)); ctx.lineTo(lerp(B[0], B2[0], k), lerp(B[1], B2[1], k)); ctx.stroke(); });
+  ctx.strokeStyle = 'rgba(20,14,8,.34)'; ctx.lineWidth = 2 + h3 * 1.6;
+  [0.22 + h2 * 0.2, 0.58 + h3 * 0.24].forEach(u => { ctx.beginPath();
+    ctx.moveTo(lerp(A[0], B[0], u), lerp(A[1], B[1], u)); ctx.lineTo(lerp(A2[0], B2[0], u), lerp(A2[1], B2[1], u)); ctx.stroke(); });
+  ctx.strokeStyle = 'rgba(12,9,5,.16)'; ctx.lineWidth = 3.4;
+  [0.12 + h1 * 0.3, 0.5 + h2 * 0.34].forEach(u => { const sx2 = lerp(A[0], B[0], u), sy2 = lerp(A[1], B[1], u);
+    ctx.beginPath(); ctx.moveTo(sx2, sy2); ctx.lineTo(lerp(sx2, lerp(A2[0], B2[0], u), 0.55 + h3 * 0.3), lerp(sy2, lerp(A2[1], B2[1], u), 0.55 + h3 * 0.3)); ctx.stroke(); });
   ctx.strokeStyle = 'rgba(168,140,96,.5)'; ctx.lineWidth = 1.2;
-  ctx.beginPath(); ctx.moveTo(A[0], A[1]); ctx.lineTo(B[0], B[1]); ctx.stroke();
+  const mx1 = lerp(A[0], B[0], 0.36), my1 = lerp(A[1], B[1], 0.36) + (h1 - 0.5) * 2.4, mx2 = lerp(A[0], B[0], 0.71), my2 = lerp(A[1], B[1], 0.71) + (h2 - 0.5) * 2.4;
+  ctx.beginPath(); ctx.moveTo(A[0], A[1]); ctx.lineTo(mx1, my1); ctx.lineTo(mx2, my2); ctx.lineTo(B[0], B[1]); ctx.stroke();
 }
 function paintTileShapes(gx, gy){
   const t = tileAt(gx, gy); if (!t) return;
@@ -364,9 +381,17 @@ function paintTileShapes(gx, gy){
     const n = tileAt(gx + 1, gy); if (!n || n.type !== 'path'){ ctx.beginPath(); ctx.moveTo(cx, cy - 10); ctx.lineTo(cx, cy + 10); ctx.stroke(); }
     return; }
   if (t.type === 'floor'){
+    const FR = mulberry32((gx * 389 + gy * 571 + 3) | 0);
     poly(diamond(gx, gy, 0, -0.14), PAL.timber);
-    ctx.strokeStyle = 'rgba(30,22,14,.5)'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(isoX(gx + 0.1, gy + 0.5), isoY(gx + 0.1, gy + 0.5, 0)); ctx.lineTo(isoX(gx + 0.9, gy + 0.5), isoY(gx + 0.9, gy + 0.5, 0)); ctx.stroke();
+    [0.3, 0.55, 0.8].forEach(v => { const a = [isoX(gx + 0.04, gy + v), isoY(gx + 0.04, gy + v, 0)], b = [isoX(gx + 0.96, gy + v), isoY(gx + 0.96, gy + v, 0)];
+      ctx.fillStyle = FR() < 0.5 ? 'rgba(255,230,180,.06)' : 'rgba(10,6,3,.09)';
+      ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.lineTo(b[0], b[1] + 3); ctx.lineTo(a[0], a[1] + 3); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = 'rgba(24,16,9,.55)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); });
+    for (let i = 0; i < 7; i++){ const px2 = gx + 0.12 + FR() * 0.7, py2 = gy + 0.14 + FR() * 0.7, ln = 3 + FR() * 6;
+      ctx.strokeStyle = 'rgba(40,28,15,' + (0.12 + FR() * 0.14).toFixed(2) + ')'; ctx.lineWidth = 0.8;
+      const p0 = [isoX(px2, py2), isoY(px2, py2, 0)]; ctx.beginPath(); ctx.moveTo(p0[0], p0[1]); ctx.lineTo(p0[0] + ln, p0[1] + ln * 0.5); ctx.stroke(); }
+    ctx.fillStyle = 'rgba(15,10,5,.6)';
+    [[0.1, 0.32], [0.9, 0.32], [0.1, 0.82], [0.9, 0.82]].forEach(([u, v]) => { const p = [isoX(gx + u, gy + v), isoY(gx + u, gy + v, 0)]; ctx.fillRect(p[0] - 0.7, p[1] - 0.7, 1.4, 1.4); });
     return; }
   if (t.type === 'crater'){
     const R = mulberry32(gx * 131 + gy * 197 + 5);
@@ -393,25 +418,43 @@ function paintTileShapes(gx, gy){
       ctx.strokeStyle = base; ctx.lineWidth = 35;
       ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(isoX(gx + dx + 0.5, gy + dy + 0.5), isoY(gx + dx + 0.5, gy + dy + 0.5, n.z)); ctx.stroke(); });
     [[1, 0], [0, 1], [1, 1], [1, -1]].forEach(([dx, dy]) => { const n = tileAt(gx + dx, gy + dy); if (!trenchLike(n)) return;
-      ctx.strokeStyle = 'rgba(13,10,7,.88)'; ctx.lineWidth = 19;
+      ctx.strokeStyle = t.type === 'dug' ? 'rgba(13,10,7,.76)' : 'rgba(13,10,7,.88)'; ctx.lineWidth = 19;
       ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(isoX(gx + dx + 0.5, gy + dy + 0.5), isoY(gx + dx + 0.5, gy + dy + 0.5, n.z)); ctx.stroke(); });
+    { /* material, not fill: churned earth worked into the floor — grain, tone, scuff, hashed per tile */
+      const FR = mulberry32((gx * 731 + gy * 197 + 11) | 0), dia = t.type === 'dug' ? diamond(gx, gy, t.z, -0.36) : diamond(gx, gy, t.z);
+      ctx.save(); ctx.beginPath(); dia.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.closePath(); ctx.clip();
+      ctx.fillStyle = ['rgba(74,60,40,.16)', 'rgba(52,42,28,.18)', 'rgba(88,72,48,.13)', 'rgba(40,32,20,.2)'][(FR() * 4) | 0];
+      ctx.fillRect(cx - 34, cy - 20, 68, 40);
+      for (let i = 0; i < 3; i++){ ctx.fillStyle = ['rgba(96,78,50,.07)', 'rgba(30,24,16,.08)', 'rgba(120,96,60,.05)'][(FR() * 3) | 0];
+        ctx.beginPath(); ctx.ellipse(cx + (FR() - 0.5) * 36, cy + (FR() - 0.5) * 16, 9 + FR() * 12, 4 + FR() * 5, FR() * 0.5, 0, 6.29); ctx.fill(); }
+      for (let i = 0; i < 44; i++){ const px2 = cx + (FR() - 0.5) * 58, py2 = cy + (FR() - 0.5) * 27, ln = 2 + FR() * 5, lt = FR() < 0.52;
+        ctx.strokeStyle = lt ? 'rgba(16,12,7,' + (0.08 + FR() * 0.1).toFixed(2) + ')' : 'rgba(196,164,110,' + (0.06 + FR() * 0.07).toFixed(2) + ')';
+        ctx.lineWidth = 0.8 + FR() * 1.1; ctx.beginPath(); ctx.moveTo(px2, py2); ctx.lineTo(px2 + ln, py2 + ln * 0.42); ctx.stroke(); }
+      for (let i = 0; i < 8; i++){ ctx.fillStyle = 'rgba(10,8,5,' + (0.06 + FR() * 0.08).toFixed(2) + ')';
+        ctx.beginPath(); ctx.ellipse(cx + (FR() - 0.5) * 48, cy + (FR() - 0.5) * 22, 3 + FR() * 7, 1.4 + FR() * 2.4, FR() * 0.6, 0, 6.29); ctx.fill(); }
+      ctx.restore(); }
     /* the far inner wall: where the trench meets higher ground, a vertical earth face
        with timber revetment. This is the depth cue: floor, wall, lip, in that order. */
     const wallFace = (x1, y1, x2, y2, x3, y3, x4, y4) => {
       paintWallTexture(x1, y1, x2, y2, x3, y3, x4, y4, gx * 3.1 + gy * 7.7);
-      ctx.strokeStyle = 'rgba(110,86,54,.6)'; ctx.lineWidth = 1.5;
-      [0.36, 0.7].forEach(k => { ctx.beginPath();
+      const wh1 = hash2(gx * 3.1 + 40, gy * 7.7), wh2 = hash2(gx * 1.3, gy * 5.9 + 8);
+      ctx.strokeStyle = 'rgba(110,86,54,.6)'; ctx.lineWidth = 1.3 + wh1 * 0.5;
+      [0.3 + wh1 * 0.14, 0.62 + wh2 * 0.14].forEach(k => { ctx.beginPath();
         ctx.moveTo(lerp(x1, x4, k), lerp(y1, y4, k)); ctx.lineTo(lerp(x2, x3, k), lerp(y2, y3, k)); ctx.stroke(); });
       ctx.strokeStyle = 'rgba(150,124,86,.4)'; ctx.lineWidth = 1.1;
-      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(lerp(x1, x2, 0.5), lerp(y1, y2, 0.5) + (wh1 - 0.5) * 2.2); ctx.lineTo(x2, y2); ctx.stroke();
       ctx.fillStyle = 'rgba(122,100,66,.35)';
       ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.lineTo(x2, y2 - 3.4); ctx.lineTo(x1, y1 - 3.4); ctx.closePath(); ctx.fill(); };
     const nN = tileAt(gx, gy - 1);
-    if (!trenchLike(nN) || nN.z > t.z) wallFace(isoX(gx, gy), isoY(gx, gy, 0), isoX(gx + 1, gy), isoY(gx + 1, gy, 0),
+    if (!trenchLike(nN) || nN.z > t.z){ wallFace(isoX(gx, gy), isoY(gx, gy, 0), isoX(gx + 1, gy), isoY(gx + 1, gy, 0),
       isoX(gx + 1, gy), isoY(gx + 1, gy, t.z), isoX(gx, gy), isoY(gx, gy, t.z));
+      poly([[isoX(gx, gy), isoY(gx, gy, t.z)], [isoX(gx + 1, gy), isoY(gx + 1, gy, t.z)], [isoX(gx + 1, gy + 0.55), isoY(gx + 1, gy + 0.55, t.z)], [isoX(gx, gy + 0.55), isoY(gx, gy + 0.55, t.z)]], 'rgba(5,4,2,.10)');
+      poly([[isoX(gx, gy), isoY(gx, gy, t.z)], [isoX(gx + 1, gy), isoY(gx + 1, gy, t.z)], [isoX(gx + 1, gy + 0.3), isoY(gx + 1, gy + 0.3, t.z)], [isoX(gx, gy + 0.3), isoY(gx, gy + 0.3, t.z)]], 'rgba(5,4,2,.16)'); }
     const nE = tileAt(gx + 1, gy);
-    if (!trenchLike(nE) || nE.z > t.z) wallFace(isoX(gx + 1, gy), isoY(gx + 1, gy, 0), isoX(gx + 1, gy + 1), isoY(gx + 1, gy + 1, 0),
+    if (!trenchLike(nE) || nE.z > t.z){ wallFace(isoX(gx + 1, gy), isoY(gx + 1, gy, 0), isoX(gx + 1, gy + 1), isoY(gx + 1, gy + 1, 0),
       isoX(gx + 1, gy + 1), isoY(gx + 1, gy + 1, t.z), isoX(gx + 1, gy), isoY(gx + 1, gy, t.z));
+      poly([[isoX(gx + 1, gy), isoY(gx + 1, gy, t.z)], [isoX(gx + 1, gy + 1), isoY(gx + 1, gy + 1, t.z)], [isoX(gx + 0.45, gy + 1), isoY(gx + 0.45, gy + 1, t.z)], [isoX(gx + 0.45, gy), isoY(gx + 0.45, gy, t.z)]], 'rgba(5,4,2,.10)');
+      poly([[isoX(gx + 1, gy), isoY(gx + 1, gy, t.z)], [isoX(gx + 1, gy + 1), isoY(gx + 1, gy + 1, t.z)], [isoX(gx + 0.7, gy + 1), isoY(gx + 0.7, gy + 1, t.z)], [isoX(gx + 0.7, gy), isoY(gx + 0.7, gy, t.z)]], 'rgba(5,4,2,.16)'); }
     if (t.type === 'trench' && t.boards){                                  // laid duckboards: planks over the mud
       ctx.strokeStyle = 'rgba(104,80,50,.75)'; ctx.lineWidth = 2.6;
       for (let bI = -1; bI <= 1; bI++){ ctx.beginPath(); ctx.moveTo(cx - 7, cy - 3 + bI * 3.4); ctx.lineTo(cx + 7, cy + 3 + bI * 3.4); ctx.stroke(); }
@@ -527,7 +570,7 @@ function soldierMove(s, dt){
   if (s.proneT > 0 && s.path) s.proneT = 0;                              // ordered to move: up and go
   if (!s.path || s.pathI >= s.path.length){
     const tz = (tileAt(Math.floor(s.fx), Math.floor(s.fy)) || { z: 0 }).z + (s.onStep ? 0.55 : 0);
-    s.z += (tz - s.z) * Math.min(1, dt * 7); s.vx = 0; s.vy = 0; return; }
+    s.z += (tz - s.z) * Math.min(1, dt * 7); s.vx = 0; s.vy = 0; s.vCur = 0; return; }
   if (s.yieldT > 0){ s.yieldT -= dt; s.vx = 0; s.vy = 0;
     const bx2 = s.fx - Math.cos(s.faceA) * 0.3 * dt, by2 = s.fy - Math.sin(s.faceA) * 0.3 * dt;
     if (walkable(tileAt(Math.floor(bx2), Math.floor(by2)), s.enemy) && !layerCross(s, bx2, by2)){ s.fx = bx2; s.fy = by2; }
@@ -574,11 +617,17 @@ function soldierMove(s, dt){
     return; }
   const adx = aimX - s.fx, ady = aimY - s.fy, adist = Math.hypot(adx, ady) || 1;
   const mx = adx / adist, my = ady / adist;
-  s.vx = mx * sp * sq; s.vy = my * sp * sq;
-  const stepL = Math.min(adist, sp * sq * dt);
+  let target = sp * sq;
+  if (isLast) target *= Math.min(1, Math.max(0.5, dist / 0.45));
+  const working = s.state === 'run' || s.state === 'carry' || s.state === 'drag';
+  const accel = target > (s.vCur || 0) ? (working ? 4.6 : 2.8) : 6.5;
+  s.vCur = (s.vCur || 0) + Math.max(-accel * dt, Math.min(accel * dt, target - (s.vCur || 0)));
+  if (s.vCur < 0.01 && target < 0.05) s.vCur = 0;
+  s.vx = mx * s.vCur; s.vy = my * s.vCur;
+  const stepL = Math.min(adist, s.vCur * dt);
   s.fx += mx * stepL; s.fy += my * stepL;
   s.faceA = Math.atan2(my, mx);
-  s.phase += sp * sq * dt * 4.4;
+  s.phase += s.vCur * dt * 4.4;
   // stepping into a tile of a different height: ladders and scrambles are events, not glides
   const here = tileAt(Math.floor(s.fx), Math.floor(s.fy));
   if (here && Math.abs(here.z - s.z) > 0.6 && !s.climbing)
@@ -586,8 +635,8 @@ function soldierMove(s, dt){
   const tz = (here || { z: s.z }).z + (s.onStep && s.path === null ? 0.55 : 0);
   if (!s.climbing) s.z += (tz - s.z) * Math.min(1, dt * 7);
   // mud at the heel
-  if (sp > 0.4 && rng() < dt * 5) sim.parts.push({ kind:'dirt', fx: s.fx, fy: s.fy, z: s.z, ox: rr(-3, 3), oy: 0, h: 1.6, vx: rr(-7, 7), vy: rr(-2, 2), vh: rr(14, 30), life: rr(.25, .45), t: 0, col: PAL.soilDark, r: rr(0.8, 1.5) });
-  if (sp > 0.4 && sim.water > 4 && tileHere && tileHere.type === 'crater' && rng() < dt * 7)  // a flooded crater answers the boot
+  if ((s.vCur || 0) > 0.4 && rng() < dt * 5) sim.parts.push({ kind:'dirt', fx: s.fx, fy: s.fy, z: s.z, ox: rr(-3, 3), oy: 0, h: 1.6, vx: rr(-7, 7), vy: rr(-2, 2), vh: rr(14, 30), life: rr(.25, .45), t: 0, col: PAL.soilDark, r: rr(0.8, 1.5) });
+  if ((s.vCur || 0) > 0.4 && sim.water > 4 && tileHere && tileHere.type === 'crater' && rng() < dt * 7)  // a flooded crater answers the boot
     sim.parts.push({ kind:'dirt', fx: s.fx, fy: s.fy, z: s.z, ox: rr(-3, 3), oy: 0, h: 2.2, vx: rr(-9, 9), vy: rr(-3, 3), vh: rr(20, 42), life: rr(.2, .4), t: 0, col: '#aeb9ba', r: rr(0.7, 1.3) });
 }
 function arrive(s){
