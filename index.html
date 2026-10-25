@@ -459,7 +459,7 @@ function makeSoldier(role, postTile){
     h: rr(0.94, 1.05), scarf: rng() < 0.32 ? pick(['accent','accent2']) : 'none',
     state: 'idle', tState: rr(0, 3), stateAge: 0, speed: rr(1.06, 1.24), phase: rr(0, 6.28),
     faceA: -Math.PI / 2, vx: 0, vy: 0, duck: 0, climbing: null, onStep: false,
-    brave: rng(), warm: rng(), friend: -1, rival: -1, grief: 0, jumpy: 0, clean: 0, letterT: rr(4, 44),
+    brave: rng(), warm: rng(), friend: -1, rival: -1, grief: 0, jumpy: 0, nerves: rr(0.65, 1), shakenT: 0, clean: 0, letterT: rr(4, 44),
     vig: null, duty: null, dead: false, arriveAct: null, shootAt: 0, fired: false, fumbled: false,
     job: null, supplyJob: null, gun: -1, gunSlot: 0, pairId: -1, sector: -1, kneel: false,
     rest: rr(0.5, 1), food: rr(0.5, 1), morale: rr(0.5, 0.9), shunned: 0, grudge: -1, assigner: -1,
@@ -948,7 +948,7 @@ function gunSprite(kind, enemy){
    Procedural WebAudio: no files. Every sound is placed by distance and bearing from the camera,
    and throttled so a busy minute never becomes a wall of noise. Starts on the first gesture. */
 const WarAudio = {
-  ctx: null, master: null, noiseBuf: null, muted: false, counts: { rifle: 0, gun: 0, boom: 0, distant: 0, whistle: 0 },
+  ctx: null, master: null, noiseBuf: null, muted: false, counts: { rifle: 0, gun: 0, boom: 0, distant: 0, whistle: 0, shout: 0 },
   last: {},
   init(){ if (this.ctx){ if (this.ctx.state === 'suspended') this.ctx.resume(); return; }
     try { const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
@@ -998,6 +998,17 @@ const WarAudio = {
     const near = e.dist < 26;
     this.noise(near ? 1.1 : 1.8, near ? 1100 : 300, 55, (near ? 0.95 : 0.4) * e.g + 0.1, e.pan);
     this.tone(95, 28, near ? 0.9 : 1.6, 0.55 * e.g + 0.05, e.pan); },
+  shout(x, y){ if (!this.ctx || !this.ok('shout', 300)) return; const e = this.ear(x, y); if (e.g < 0.02) return; this.counts.shout++;
+    [0, 0.3].forEach((off, i) => { const c = this.ctx, t = c.currentTime + off;
+      const srcN = c.createBufferSource(); srcN.buffer = this.noiseBuf; srcN.playbackRate.value = rr(0.85, 1.05);
+      const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 2.4;
+      bp.frequency.setValueAtTime(i ? 500 : 740, t); bp.frequency.exponentialRampToValueAtTime(i ? 420 : 520, t + 0.17);
+      const gn = c.createGain(); gn.gain.setValueAtTime(0, t);
+      gn.gain.linearRampToValueAtTime(0.22 * e.g, t + 0.03); gn.gain.exponentialRampToValueAtTime(0.001, t + 0.21);
+      const pn = c.createStereoPanner ? c.createStereoPanner() : null;
+      srcN.connect(bp); bp.connect(gn);
+      if (pn){ pn.pan.value = e.pan; gn.connect(pn); pn.connect(this.master); } else gn.connect(this.master);
+      srcN.start(t); srcN.stop(t + 0.26); }); },
   distant(){ if (!this.ctx || !this.ok('distant', 700)) return; this.counts.distant++;
     this.noise(rr(1.2, 2.2), 170, 60, rr(0.06, 0.14), rr(-0.6, 0.6)); this.tone(70, 30, 1.4, 0.07, 0); },
   whistle(x, y, dur){ if (!this.ctx || !this.ok('whistle', 160)) return; const e = this.ear(x, y);
@@ -1253,7 +1264,7 @@ function think(s){
   if (s.hx === undefined){ s.hx = Math.floor(s.fx); s.hy = Math.floor(s.fy); }
   const h = sim.hour, A = sim.map.anchors, sec = sim.map.sectors[clamp(s.sector, 0, 2)] || sim.map.sectors[1];
   const night = h < 5.6 || h > 19.4;
-  const standTo = (h > 5.65 && h < 6.75) || (h > 18.7 && h < 19.7);
+  const standTo = ((h > 5.65 && h < 6.75) || (h > 18.7 && h < 19.7)) && sim.t >= (s.alertT || 0);
   const messWin = (h > 6.9 && h < 8.4) || (h > 11.9 && h < 13.1) || (h > 17.4 && h < 18.6);
   const idle = (min, max) => setState(s, 'idle', rr(min || 0.6, max || 1.6));
   const go = (gx, gy, opts) => { if (!goTo(s, gx, gy, opts || {})) idle(); };
@@ -1312,7 +1323,7 @@ function think(s){
       if (sim.order === o) sim.order = null;
       s.duty = null; s.orderRef = null; logEvent('order', 'A runner carried an order up the line.', [s.id]);
       idle(0.5, 1); return; }
-    if (sim.order && !sim.order.carried && !sim.order.delivered){ s.duty = 'courier'; s.orderRef = sim.order; go(A.table[0], A.table[1], {}); return; }
+    if (sim.order && !sim.order.carried && !sim.order.delivered && sim.order.channel !== 'wire'){ s.duty = 'courier'; s.orderRef = sim.order; go(A.table[0], A.table[1], {}); return; }
     const r = rng();
     if (r < 0.5){ go(A.hqYard[0] + ri(-1, 1), A.hqYard[1] + ri(0, 1), {}); idle(2, 4); }
     else if (r < 0.7){ go(A.cook[0], A.cook[1], {}); s.vig = { pose:'cards', t: rr(4, 6) }; }
@@ -1495,7 +1506,8 @@ function burst(bx, by){
       if (pw > 1.1) startRag(s, Math.cos(a) * pw * 1.5, Math.sin(a) * pw * 1.5, rr(-6.5, 6.5)); }
     else if (d < 3.4 && s.state !== 'down'){ const tt = tileAt(Math.floor(s.fx), Math.floor(s.fy));
       if (tt && tt.z >= 0 && !s.path) s.proneT = Math.max(s.proneT || 0, rr(2.5, 4.5));
-      else s.duck = Math.max(s.duck, rr(0.7, 1.4)); } });
+      else s.duck = Math.max(s.duck, rr(0.7, 1.4)); }
+    if (d < 4.5 && s.state !== 'down') s.nerves = Math.max(0, (s.nerves ?? 0.8) - (4.5 - d) * 0.006); });
 }
 function dropJob(s){ if (s.job){ s.job = null; } }
 function faceToward(s, x, y){ const a = Math.atan2(y - s.fy, x - s.fx);
@@ -1528,6 +1540,8 @@ function recordSeen(kind, about, x, y, r){
   sim.soldiers.forEach(o => { if (o.dead || o.enemy || o.state === 'down') return;
     if (Math.hypot(o.fx - x, o.fy - y) < (r || 7)){ o.seen = o.seen || [];
       if (!o.seen.some(e => e.key === ev.key)) o.seen.push(ev);
+      if (kind === 'death') o.nerves = Math.max(0, (o.nerves ?? 0.8) - 0.05);
+      if (kind === 'wound') o.nerves = Math.max(0, (o.nerves ?? 0.8) - 0.03);
       if (o.seen.length > 8) o.seen.shift(); } });
 }
 /* the bearer pairs: a free pair claims the oldest waiting casualty, bed reserved at the claim */
@@ -1584,10 +1598,14 @@ function killSoldier(s, cause){
 }
 function fireTracer(a, b){
   sim.parts.push({ kind:'tracer', fx0: a.fx, fy0: a.fy, z0: a.z + 1.3, fx1: b.fx ?? b[0], fy1: b.fy ?? b[1], z1: (b.z ?? 0) + 1, t: 0, life: 0.09 });
-  puff(a.fx, a.fy, a.z + 1.2, 26, { tint:'smoke', vh: 2.4, life: rr(.5, .9), r: rr(3.5, 5.5), a: 0.4 });
+  puff(a.fx, a.fy, a.z + 1.2, 26, { tint:'smoke', vh: 2.2, life: rr(1, 1.7), r: rr(5, 7.5), a: 0.55 });
+  for (let i = 0; i < 3; i++){ const d = 0.35 + i * 0.3;
+    sim.parts.push({ kind: 'puff', fx: a.fx + Math.cos(a.faceA) * d, fy: a.fy + Math.sin(a.faceA) * d, z: a.z + 1.1,
+      ox: Math.cos(a.faceA) * i * 2, oy: Math.sin(a.faceA) * i, h: 24 + i * 3, vx: 0, vy: 0, vh: rr(1.2, 2.4),
+      life: rr(2.4, 4.4), t: 0, col: '#d8d2c4', r: rr(4.5, 7) }); }
   if (rng() < 0.3 && canSpawn()) sim.parts.push({ kind:'spark', fx: a.fx, fy: a.fy, z: a.z + 1, ox: 3, oy: 2, h: 18,
     vx: rr(-6, 10), vy: rr(2, 8), vh: rr(-26, -8), life: rr(.25, .45), t: 0, col: '#e8c877' });   // the spent case, glinting out
-  sim.lights.push({ fx: a.fx, fy: a.fy, z: a.z + 1.2, r: 54, t: 0, ttl: 0.09 });
+  sim.lights.push({ fx: a.fx, fy: a.fy, z: a.z + 1.2, r: 72, t: 0, ttl: 0.13 });
   const tt = tileAt(Math.floor(b.fx ?? 0), Math.floor(b.fy ?? 0));                    // every shot chips something
   if (tt && rng() < 0.7) tt.chips = Math.min(9, tt.chips + 1);
 }
@@ -1612,7 +1630,9 @@ function updateEvents(dt){
       sim.soldiers.push(r);
       const tg = clamp(cx + ri(-4, 6), 6, 86); goTo(r, tg, trenchY(tg), { enemy: true, scramble: true, state: 'walk' }); }
     recordSeen('raid', 0, cx, 14, 26);
-    logEvent('raid', 'A raid comes over the wire in the dark.'); }
+    logEvent('raid', 'A raid comes over the wire in the dark.');
+    [-6, 0, 6].forEach(off2 => sim.parts.push({ kind: 'ring', fx: clamp(cx + off2, 6, 86), fy: trenchY(clamp(cx + off2, 6, 86)), z: -1, ox: 0, oy: 0, h: 20, vx: 0, vy: 0, vh: 0, life: 1.3, t: 0, col: '#e8dcc0', r: 3 }));
+    WarAudio.shout(cx, 14); }
   if (sim.raid.active){ sim.raid.t += dt;
     const alive = sim.soldiers.filter(s => s.enemy && s.raid && !s.dead);
     if (!alive.length || sim.raid.t > 110){ sim.raid.active = false; sim.nextRaid = sim.t + rr(150, 320);
@@ -1631,9 +1651,9 @@ function updateEvents(dt){
 /* ================= the works: jobs, repairs, and the big project ================= */
 function regenJobs(){
   const held = new Set(sim.soldiers.filter(s => s.job).map(s => s.job.type + ':' + s.job.gx + ',' + s.job.gy));
-  const jobs = []; let dmgSum = 0, dmgN = 0, fills = 0;
+  const jobs = []; let dmgSum = 0, dmgN = 0, fills = 0; const dmgSec = [0, 0, 0];
   for (let gy = 0; gy < MH; gy++) for (let gx = 0; gx < MW; gx++){ const t = sim.grid[gy][gx];
-    if (t.type === 'trench' || t.type === 'dug'){ dmgSum += t.damage; dmgN++;
+    if (t.type === 'trench' || t.type === 'dug'){ dmgSum += t.damage; dmgN++; dmgSec[gx < 33 ? 0 : gx < 61 ? 1 : 2] += t.damage;
       if ((t.damage >= 0.3 || t.rubble >= 0.3) && !held.has('repair:' + gx + ',' + gy)) jobs.push({ type:'repair', gx, gy, t: rr(4, 8) }); }
     else if (t.type === 'crater' && !t.filled && gy >= 10 && gy <= 16 && fills < 2 && !held.has('fill:' + gx + ',' + gy)){ jobs.push({ type:'fill', gx, gy, t: rr(5, 9) }); fills++; } }
   sim.avgDamage = dmgN ? dmgSum / dmgN : 0;
@@ -1644,6 +1664,14 @@ function regenJobs(){
     const stand = P.idx === 0 ? [P.gx, trenchY(P.gx)] : P.tiles[P.idx - 1];
     const n = sim.soldiers.filter(s => s.job && s.job.type === 'project').length;
     for (let i = n; i < 2; i++) jobs.push({ type:'project', gx: P.tiles[P.idx][0], gy: P.tiles[P.idx][1], stand }); }
+  sim.dmgSec = dmgSec;
+  const wire = sim.wireCut, worstSec = dmgSec.indexOf(Math.max(dmgSec[0], dmgSec[1], dmgSec[2]));
+  const prioOf = j => { if (wire && Math.abs(j.gx - wire[0]) <= 3 && Math.abs(j.gy - wire[1]) <= 3) return 0;
+    if (j.type === 'repair') return (j.gx < 33 ? 0 : j.gx < 61 ? 1 : 2) === worstSec ? 1 : 4;
+    if (j.type === 'project') return 2;
+    if (j.type === 'work') return 3;
+    return 5; };
+  jobs.sort((a, b) => prioOf(a) - prioOf(b));
   sim.jobs = jobs;
 }
 function siteWorks(kind){
@@ -1659,6 +1687,11 @@ function siteWorks(kind){
       if (tiles.every(([x, y]) => { const t = tileAt(x, y); return t && t.type === 'ground'; }))
         return { kind, tiles, stage: 1, prog: 0, need: 15, gx: gx + 1, gy, text: 'Sappers mark out a new dugout behind the support line.' }; }
     return null; }
+  if (kind === 'searchlight'){ const sec = sim.map.sectors[ri(0, 2)];
+    for (let gx = sec.x0 + 4; gx <= sec.x1 - 4; gx++){ const gy = supportY(gx); const t = tileAt(gx, gy);
+      if (t && t.type === 'trench' && !sim.searchlights.some(sl => Math.abs(sl.gx - gx) < 14))
+        return { kind, tiles: [[gx, gy]], stage: 1, prog: 0, need: 12, gx, gy, text: 'A working party starts on a searchlight platform behind the line.' }; }
+    return null; }
   const gy = 14 + ri(0, 1);
   for (let gx = 8; gx <= 80; gx++){ const tiles = [];
     let ok = true; for (let i = 0; i < 8; i++){ const t = tileAt(gx + i, gy); if (!t || t.type !== 'ground'){ ok = false; break; } tiles.push([gx + i, gy]); }
@@ -1667,8 +1700,8 @@ function siteWorks(kind){
 }
 function worksTick(){
   if (sim.works || sim.t < 500 || sim.raid.active || sim.stocks.depot.timber < 6) return;
-  const kinds = ['parapet', 'dugout', 'wire'];
-  for (let k = 0; k < 3; k++){ const W = siteWorks(kinds[(sim.worksCycle + k) % 3]);
+  const kinds = ['parapet', 'dugout', 'wire', 'searchlight'];
+  for (let k = 0; k < 4; k++){ const W = siteWorks(kinds[(sim.worksCycle + k) % 4]);
     if (W){ sim.works = W; sim.worksCycle += k + 1; logEvent('work', W.text); (sim.__wlog = sim.__wlog || []).push('started ' + W.kind + ' at ' + W.gx + ',' + W.gy + ' t=' + Math.round(sim.t)); return; } }
 }
 function worksWork(s, j, dt){
@@ -1681,6 +1714,8 @@ function worksWork(s, j, dt){
   const doneStage = W.stage;
   if (sim.stocks.depot.timber > 0) sim.stocks.depot.timber = Math.max(0, sim.stocks.depot.timber - 2);
   if (W.kind === 'parapet') W.tiles.forEach(([x, y]) => { const t = tileAt(x, y); if (t){ t.parapet = doneStage; markDirty(x, y); } });
+  if (W.kind === 'searchlight' && doneStage >= 3){ sim.searchlights.push({ gx: W.gx, gy: W.gy });
+    logEvent('work', 'The searchlight is up. At night its beam worries the dark.'); }
   if (W.kind === 'wire' && PROP_DRAW.wire) W.tiles.slice((doneStage - 1) * 3, doneStage * 3 + 1)
     .forEach(([x, y]) => sim.props.push({ kind: 'wire', fx: x + 0.5, fy: y + 0.5, z: 0 }));
   if (doneStage < 3){ W.stage++; (sim.__wlog = sim.__wlog || []).push(W.kind + ' stage ' + W.stage + ' at t=' + Math.round(sim.t)); return; }
@@ -1713,6 +1748,12 @@ function drawWorks(){
       for (let i = 1; i < 4; i++){ const k = i / 4;
         ctx.beginPath(); ctx.moveTo(lerp(tops[0][0], tops[1][0], k), lerp(tops[0][1], tops[1][1], k));
         ctx.lineTo(lerp(tops[3][0], tops[2][0], k), lerp(tops[3][1], tops[2][1], k)); ctx.stroke(); } } }
+  if (W.kind === 'searchlight' && W.stage >= 2){ const bx = isoX(W.gx + 0.5, W.gy + 0.5), by = isoY(W.gx + 0.5, W.gy + 0.5, -1);
+    ctx.strokeStyle = 'rgba(52,42,30,.95)'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(bx - 7, by); ctx.lineTo(bx, by - 30); ctx.lineTo(bx + 7, by); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(bx - 7, by - 14); ctx.lineTo(bx + 7, by - 14); ctx.stroke();
+    ctx.fillStyle = '#2c2620'; ctx.fillRect(bx - 4.5, by - 36, 9, 7);
+    ctx.fillStyle = W.stage >= 3 ? '#e8d9a8' : '#6b6252'; ctx.fillRect(bx - 3, by - 34.6, 6, 4); }
   /* stakes and string: the surveyor's control lines around the site */
   const stops = corners.map(([px, py]) => [px, py - 7]);
   ctx.strokeStyle = 'rgba(226,206,160,.75)'; ctx.lineWidth = 1;
@@ -1782,6 +1823,14 @@ function updateSoldier(s, dt){
   s.stance = wantStance;
   const stTarget = wantStance === 'stand' ? 1 : wantStance === 'crouch' ? 0.8 : wantStance === 'kneel' ? 0.63 : 0.1;
   s.stanceK = (s.stanceK === undefined ? 1 : s.stanceK) + (stTarget - (s.stanceK === undefined ? 1 : s.stanceK)) * Math.min(1, dt * 5);
+  /* nerves: sleep mends them, night posts wear them, and a man can break */
+  if (s.state === 'sleep') s.nerves = Math.min(1, (s.nerves ?? 0.8) + dt * 0.004);
+  else if (s.state === 'watch' && (sim.hour < 5.6 || sim.hour > 19.4)) s.nerves = Math.max(0, (s.nerves ?? 0.8) - dt * 0.0006);
+  if ((s.nerves ?? 0.8) < 0.16 && sim.t > (s.shakenT || 0) && !s.foe && s.state !== 'down' && s.state !== 'sleep' && rng() < dt * 0.02){
+    s.shakenT = sim.t + 3000; dropJob(s); s.path = null; s.nerves = 0.3;
+    const secN = sim.map.sectors[clamp(s.sector, 0, 2)] || sim.map.sectors[1];
+    goTo(s, secN.dug[0] + 1, 23, { act: 'bow' });
+    recordSeen('shaken', s.id, s.fx, s.fy, 7); }
   s.grief = Math.max(0, s.grief - dt * 0.0022); s.jumpy = Math.max(0, s.jumpy - dt);
   s.shunned = Math.max(0, (s.shunned || 0) - dt); s.letterT = (s.letterT || 0) + dt;
   if (!s.dead && !s.enemy && s.state !== 'down'){
@@ -1986,9 +2035,9 @@ function updateSoldier(s, dt){
           cyc.t = cyc.stage === 'reload' ? rr(0.9, 1.4) : (s.rifle.foul > 0.5 ? rr(0.9, 1.5) : rr(0.35, 0.65)) + (jam ? rr(1.4, 2.4) : 0);
           if (jam) s.jumpy = Math.max(s.jumpy, 260); } } }
     else if (cyc.stage === 'bolt'){ s.vig = { pose: Math.floor(cyc.t * 4) % 2 ? 'boltA' : 'boltB', t: 0.18 };
-      if (cyc.t <= 0){ cyc.stage = 'aim'; cyc.t = rr(1.6, 4.4); } }
+      if (cyc.t <= 0){ cyc.stage = 'aim'; cyc.t = rr(1.6, 4.4) * (0.55 + (s.nerves ?? 0.8) * 0.6); } }
     else if (cyc.stage === 'reload'){ s.vig = { pose: 'reload', t: 0.18 };
-      if (cyc.t <= 0){ cyc.stage = 'aim'; cyc.t = rr(1.2, 3.4); } }
+      if (cyc.t <= 0){ cyc.stage = 'aim'; cyc.t = rr(1.2, 3.4) * (0.55 + (s.nerves ?? 0.8) * 0.6); } }
     return; }
   /* enemy raiders hunt */
   if (s.enemy && s.raid){ let tgt = null, bd = 99;
@@ -2006,13 +2055,15 @@ function updateParts(dt){
   if (sim.parts.length > 880) sim.parts.splice(0, sim.parts.length - 880);       // the pool is a pool: oldest die first
   for (const p of sim.parts){ p.t += dt;
     if (p.kind === 'puff'){ p.h += (p.vh || 6) * dt; p.ox = (p.ox || 0) + dt * (2.2 + (sim.windX || 0)); }
+    if (p.kind === 'ring') p.r += dt * 26;
     if (p.kind === 'spark'){ p.ox += (p.vx || 0) * dt; p.oy += (p.vy || 0) * dt; p.h += (p.vh || 0) * dt; p.vh -= 300 * dt; if (p.h < 0){ p.h = 0; p.vh *= -0.4; } }
     if (p.kind === 'shell'){ p.p += dt / p.dur;
       if (!p.whistled && p.p > 0.5){ p.whistled = true; WarAudio.whistle(p.tx, p.ty, p.dur * (1 - p.p)); }
       if (p.p >= 1){ p.p = 1; p.t = 999; burst(p.tx, p.ty); } continue; }
     if (p.kind === 'dirt'){ p.ox += p.vx * dt; p.oy += p.vy * dt; p.h += p.vh * dt; p.vh -= 340 * dt; if (p.h < 0) p.h = 0; }
     if (p.kind === 'steam'){ p.ox = (p.ox || 0) + p.vx * dt * 0.2; p.h = (p.h || 8) + (p.vh || 12) * dt; }
-    if (p.kind === 'flare'){ p.h -= dt * 4.6; p.fx += dt * 0.06; if (p.h < 26) p.life = Math.min(p.life, 0.6);
+    if (p.kind === 'flare'){ p.h -= dt * 3.4; p.fx += dt * (0.1 + (sim.windX || 0) * 0.012); if (p.h < 26) p.life = Math.min(p.life, 0.6);
+      if (rng() < dt * 5) sim.parts.push({ kind: 'puff', fx: p.fx, fy: p.fy, z: 0, ox: 0, oy: 0, h: p.h - 4, vx: 0, vy: 0, vh: -3, life: rr(0.8, 1.6), t: 0, col: '#cbb98f', r: rr(2, 3.4) });
       p.smokeT = (p.smokeT || 0) - dt; if (p.smokeT <= 0){ p.smokeT = 0.22; puff(p.fx, p.fy, 0, Math.max(4, p.h - 6), { tint:'smoke', vh: 3, life: rr(1.2, 2), r: rr(5, 8), a: 0.34 }); } } }
   sim.parts = sim.parts.filter(p => p.t < (p.life || 1));
   sim.lights.forEach(L => L.t += dt); sim.lights = sim.lights.filter(L => L.t < L.ttl);
@@ -2112,7 +2163,7 @@ function buildWeekly(){
   else if (deaths.length){ head = 'NAMES FOR THE GRAVES'; stand = 'One week, measured the only way this place measures anything.'; }
   const list = arr => arr.map(e => '<p>' + e.text + '</p>').join('');
   const seenTxt = new Set();
-  const colour = evs.filter(e => ['theft', 'scuffle', 'inspection', 'squad', 'organ', 'patrol', 'wire', 'work'].includes(e.kind))
+  const colour = evs.filter(e => ['theft', 'scuffle', 'inspection', 'squad', 'organ', 'patrol', 'wire', 'work', 'nerves', 'shaken', 'report', 'radio'].includes(e.kind))
     .filter(e => { if (seenTxt.has(e.text)) return false; seenTxt.add(e.text); return true; }).slice(0, 6);
   let h = '<button class="wclose" id="weeklyClose">\u00d7</button>';
   h += '<div class="mast">THE FRONT WEEKLY</div>';
@@ -2233,18 +2284,61 @@ function updateSystems(dt){
   if (sim.dayCount !== day){ sim.dayCount = day; sim.mailDone = false; sim.rumDone = false;
     sim.organDone = false;
     if (day > 1) logEvent('day', 'Day ' + day + ' on ' + sim.planet + '.');
-    if (day % 7 === 0) sim.weeklyReady = true; }
+    if (day % 7 === 0) sim.weeklyReady = true;
+    const avgN = sim.soldiers.reduce((a, s) => a + (s.dead || s.enemy ? 0 : (s.nerves ?? 0.8)), 0) / Math.max(1, sim.soldiers.filter(s => !s.dead && !s.enemy).length);
+    if (day > 1 && avgN < 0.45) logEvent('nerves', 'Nerves are fraying along the line. Men startle at shadows.'); }
+  /* stand-to is shouted: rings roll from the sergeants' throats at dawn and dusk */
+  const stNow = (sim.hour > 5.65 && sim.hour < 6.75) || (sim.hour > 18.7 && sim.hour < 19.7);
+  if (stNow && !sim.standToWas){ sim.standToWas = true;
+    sim.soldiers.forEach(s => { if (s.dead || s.enemy) return;
+      if (s.trade === 'sergeant' || s.trade === 'officer'){
+        sim.parts.push({ kind: 'ring', fx: s.fx, fy: s.fy, z: s.z, ox: 0, oy: 0, h: 20, vx: 0, vy: 0, vh: 0, life: 1.3, t: 0, col: '#e8dcc0', r: 3 });
+        s.vig = { pose: 'point', t: 1.4 }; } });
+    const lateSec = rng() < 0.3 ? ri(0, 2) : -1;
+    sim.soldiers.forEach(s => { if (s.dead || s.enemy) return;
+      s.alertT = sim.t + ((s.trade === 'sergeant' || s.trade === 'officer') ? rr(0, 2) : (s.sector === lateSec ? rr(40, 85) : rr(1, 9))); });
+    if (lateSec >= 0) logEvent('order', sim.map.sectors[lateSec].id + ' sector is late to stand-to. The shout never reached the far dugouts.');
+    const offS = sim.soldiers.find(s => s.trade === 'officer' && !s.dead);
+    if (offS) WarAudio.shout(offS.fx, offS.fy); }
+  if (!stNow) sim.standToWas = false;
   /* officer orders: written at HQ, carried by a runner, executed by sergeants */
   sim.ordersT = (sim.ordersT ?? 20) - dt;
   if (sim.ordersT <= 0){ sim.ordersT = rr(45, 85);
     if (!sim.order && !sim.pendingAssign){
-      const counts = [0, 0, 0];
-      sim.jobs.forEach(j => { const i = sim.map.sectors.findIndex(x => j.gx >= x.x0 && j.gx <= x.x1); if (i >= 0) counts[i]++; });
-      let sec = counts.indexOf(Math.max(counts[0], counts[1], counts[2]));
-      if (counts[sec] === 0) sec = ri(0, 2);
-      const type = sim.project ? 'dig' : (counts[sec] > 0 ? 'repair' : (rng() < 0.35 ? 'dig' : 'repair'));
-      sim.order = { sector: sec, type, carried: false, delivered: false };
-      logEvent('order', 'An order is written at HQ for ' + sim.map.sectors[sec].id + ' sector.'); } }
+      /* he works from reports, not from the war: the stalest fact he owns is the one he trusts */
+      const I = sim.intel;
+      let sec = ri(0, 2), type = 'repair', why = 'the line wants work';
+      if (sim.intelWire.down){ sec = I.indexOf(I.reduce((a, b) => a.t < b.t ? a : b)); why = 'the phones are down, by the last report, and a sector has gone quiet'; }
+      else { let dryI = -1, lowA = 2; I.forEach((p, i) => { if (p.ammo < lowA){ lowA = p.ammo; dryI = i; } });
+        if (dryI >= 0){ sec = dryI; why = 'the last tally says rifle ammunition is running dry there'; }
+        else { sec = I.indexOf(I.reduce((a, b) => a.dmg > b.dmg ? a : b)); why = 'the last report says the parapet there is shot to pieces'; } }
+      if (sim.project && rng() < 0.4){ type = 'dig'; why = 'the sap must go forward'; }
+      const channel = sim.intelWire.down ? 'runner' : 'wire';
+      const o = { sector: sec, type, carried: false, delivered: false, channel, wireT: channel === 'wire' ? 6 : 0, sentT: sim.t, retries: 0, fate: 'ok' };
+      if (channel === 'wire'){
+        if (sim.wireCut) o.fate = 'lost';                       /* he believes the line is up. It is not. Nobody tells him. */
+        else { const failP = 0.12 + sim.intensity * 0.22, r = rng();
+          if (r < failP) o.fate = 'lost'; else if (r < failP + 0.08) o.fate = 'garbled'; } }
+      else if (rng() < 0.1) o.fate = 'garbled';
+      if (o.fate === 'garbled'){ if (rng() < 0.6) o.sector = clamp(sec + (rng() < 0.5 ? -1 : 1), 0, 2); else o.type = type === 'dig' ? 'repair' : 'dig'; }
+      sim.order = o;
+      const off = sim.soldiers.find(s => s.trade === 'officer' && !s.dead);
+      if (off){ off.vig = { pose: 'observe', t: rr(2.5, 4) };
+        sim.parts.push({ kind: 'ring', fx: off.fx, fy: off.fy, z: off.z, ox: 0, oy: 0, h: 20, vx: 0, vy: 0, vh: 0, life: 1.1, t: 0, col: '#e8dcc0', r: 3 }); }
+      logEvent('order', 'An order is written at HQ for ' + sim.map.sectors[sec].id + ' sector: ' + why + (channel === 'wire' ? ' It goes down the wire.' : ' A runner will carry it; HQ believes the phones are down.')); } }
+  /* an order on the wire arrives in seconds; an order on foot takes a runner */
+  if (sim.order && sim.order.channel === 'wire' && !sim.order.delivered && sim.order.fate !== 'lost'){ sim.order.wireT -= dt;
+    if (sim.order.wireT <= 0){ const o = sim.order; o.delivered = true; sim.pendingAssign = o;
+      const sgt = sim.soldiers.find(x => x.trade === 'sergeant' && x.sector === o.sector && !x.dead) || sim.soldiers.find(x => x.trade === 'sergeant' && !x.dead);
+      if (sgt){ sgt.duty = 'assign'; sgt.orderRef = o; setState(sgt, 'idle', 0.1);
+        sim.parts.push({ kind: 'ring', fx: sgt.fx, fy: sgt.fy, z: sgt.z, ox: 0, oy: 0, h: 20, vx: 0, vy: 0, vh: 0, life: 1.1, t: 0, col: '#e8dcc0', r: 3 }); }
+      if (sim.order === o) sim.order = null;
+      logEvent('order', 'The order comes down the wire to ' + sim.map.sectors[o.sector].id + ' sector.'); } }
+  if (sim.order && !sim.order.delivered){ const o = sim.order, limit = o.channel === 'wire' ? 50 : 150;
+    if (sim.t - o.sentT > limit){ const secId = sim.map.sectors[o.sector].id;
+      if ((o.retries || 0) < 1 && o.channel === 'wire'){ o.retries = 1; o.channel = 'runner'; o.carried = false; o.fate = 'ok'; o.sentT = sim.t;
+        logEvent('order', 'No word back from ' + secId + ' sector. The order goes out again, this time by runner.'); }
+      else { logEvent('order', 'No word ever came back from ' + secId + ' sector. HQ lets the order drop.'); sim.order = null; } } }
   /* logistics: deficits become carrying jobs */
   sim.logisticsT = (sim.logisticsT ?? 5) - dt;
   if (sim.logisticsT <= 0){ sim.logisticsT = 6;
@@ -2265,13 +2359,39 @@ function updateSystems(dt){
           s.state !== 'down' && s.state !== 'sleep' && s.state !== 'watch' && (s.trade === 'carrier' || s.trade === 'rifle' || s.trade === 'sapper'))
           .sort((a, b) => (b.trade === 'carrier' ? 1 : 0) - (a.trade === 'carrier' ? 1 : 0))[0];
         if (free){ free.supplyJob = { com: n.com, qty: n.qty, from: 'depot', to: n.to, phase: 'fetch' }; setState(free, 'idle', 0.2); } } } }
+  /* reports crawl back to HQ, when they crawl at all. The officer's war is only ever made of these. */
+  sim.repT = (sim.repT ?? 30) - dt;
+  if (sim.repT <= 0){ sim.repT = rr(45, 75);
+    let si = 0; sim.intel.forEach((p, i) => { if (p.t < sim.intel[si].t) si = i; });
+    const byWireR = !sim.wireCut;
+    const lost = rng() < (byWireR ? 0.1 + sim.intensity * 0.15 : 0.22);
+    sim.inflight.push({ kind: 'report', sector: si, at: sim.t + (byWireR ? rr(3, 7) : rr(24, 55)), lost, byWire: byWireR }); }
+  for (let i = sim.inflight.length - 1; i >= 0; i--){ const m = sim.inflight[i];
+    if (sim.t >= m.at){ sim.inflight.splice(i, 1);
+      if (m.kind === 'report' && !m.lost){ const err = m.byWire ? 0.3 : 0.6;
+        sim.intel[m.sector] = { dmg: Math.max(0, (sim.dmgSec ? sim.dmgSec[m.sector] : 0) * rr(1 - err, 1 + err)),
+          ammo: Math.max(0, Math.round(sim.stocks.sectors[m.sector].ammo + rr(-1.2, 1.2))), t: sim.t };
+        sim.intelWire = { down: !!sim.wireCut, t: sim.t };
+        if (rng() < 0.4) logEvent('report', 'Word reaches HQ from ' + sim.map.sectors[m.sector].id + ' sector' + (m.byWire ? ', down the wire.' : ', by a blown runner, half out of breath.')); } } }
+  /* a fire mission the battery never heard gets called once more, then let go */
+  for (let i = sim.radioRetry.length - 1; i >= 0; i--){ const m = sim.radioRetry[i];
+    if (sim.t >= m.at){ sim.radioRetry.splice(i, 1);
+      if (rng() < 0.6 - sim.rain * 0.2) sim.missionQ.push({ tx: m.tx, ty: m.ty, rounds: m.rounds });
+      else logEvent('radio', 'The battery never answers. Static, and the planet eating the signal.'); } }
   /* the battery: the observer calls, the guns serve, shells fly on real arcs */
   sim.missionT = (sim.missionT ?? 12) - dt;
   if (sim.missionT <= 0){ sim.missionT = rr(16, 34) / (0.5 + sim.intensity);
     const obs = sim.soldiers.find(s => s.trade === 'observer' && !s.dead);
-    if (obs && (!sim.wireCut || rng() < 0.3)){
-      if (rng() < 0.4){ const eg = pick(sim.eguns); if (eg) sim.missionQ.push({ tx: eg.fx, ty: eg.fy, rounds: ri(2, 3) }); }
-      else sim.missionQ.push({ tx: rr(8, 84), ty: enemyY(ri(8, 84)) + rr(-0.5, 1), rounds: ri(2, 4) }); } }
+    if (obs){
+      let tx = null, ty = 0, rounds = 0;
+      if (rng() < 0.4){ const eg = pick(sim.eguns); if (eg){ tx = eg.fx; ty = eg.fy; rounds = ri(2, 3); } }
+      else { tx = rr(8, 84); ty = enemyY(ri(8, 84)) + rr(-0.5, 1); rounds = ri(2, 4); }
+      if (tx !== null){ /* the call can fail outright, or arrive with the grid wrong */
+        const callOk = sim.wireCut ? rng() < 0.55 - sim.rain * 0.2 : rng() < 0.92;
+        if (!callOk) sim.radioRetry.push({ tx, ty, rounds, at: sim.t + rr(15, 30) });
+        else { if (rng() < 0.1){ tx += rr(-5, 5); ty += rr(-2, 2);
+            logEvent('radio', 'The grid comes through garbled. The guns shoot where the message said, not where the observer meant.'); }
+          sim.missionQ.push({ tx, ty, rounds }); } } } }
   sim.guns.forEach(g => { if (g.enemy) return; g.ct -= dt;
     if (g.cycle === 'idle' && g.ct <= 0){
       if (sim.missionQ.length && g.ammo > 0){ g.cycle = 'serve'; g.stage = 0; g.ct = 1.7; }
@@ -2338,10 +2458,11 @@ function updateSystems(dt){
     logEvent('mail', 'Mail reaches the line. Men read in corners.'); }
   if (!sim.rumDone && hf > 17 && hf < 17.4){ sim.rumDone = true;
     sim.soldiers.filter(s => !s.dead && !s.enemy).forEach(s => s.morale = clamp((s.morale || 0.5) + 0.05, 0, 1));
+    sim.soldiers.forEach(s => { if (!s.dead && !s.enemy) s.nerves = Math.min(1, (s.nerves ?? 0.8) + 0.03); });
     logEvent('rum', 'The rum call goes round before stand-to.'); }
   /* flares on a tense night */
   if ((hf < 4.6 || hf > 19.6) && rng() < dt * 0.03 * (0.5 + sim.intensity))
-    sim.parts.push({ kind: 'flare', fx: rr(10, 82), fy: rr(10, 16), z: 0, h: rr(120, 170), t: 0, life: rr(6, 10), col: rng() < 0.6 ? 'accent' : 'accent2' });
+    sim.parts.push({ kind: 'flare', fx: rr(10, 82), fy: rr(10, 16), z: 0, h: rr(130, 185), t: 0, life: rr(8, 13), col: rng() < 0.6 ? 'accent' : 'accent2' });
   /* the paper arrives in the morning, and the watcher reads it */
   if (sim.weeklyReady && !sim.paperOpen && hf > 7 && hf < 10.5) showWeekly();
   /* a mouth-organ at dusk, and men drift toward the sound */
@@ -2524,12 +2645,17 @@ function drawPart(p){
     ctx.globalAlpha = 1; }
   else if (p.kind === 'spark'){ ctx.fillStyle = p.col || '#ffb45e'; ctx.globalAlpha = Math.max(0, 1 - p.t / p.life);
     ctx.fillRect(isoX(p.fx, p.fy) + (p.ox || 0) - 1.1, isoY(p.fx, p.fy, p.z) + (p.oy || 0) - (p.h || 0) - 1.1, 2.2, 2.2); ctx.globalAlpha = 1; }
+  else if (p.kind === 'ring'){ const sx = isoX(p.fx, p.fy), sy = isoY(p.fx, p.fy, p.z) - (p.h || 0);
+    ctx.strokeStyle = p.col || '#e8dcc0'; ctx.globalAlpha = Math.max(0, 1 - p.t / p.life) * 0.55; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.ellipse(sx, sy, p.r, p.r * 0.42, 0, 0, 6.29); ctx.stroke(); ctx.globalAlpha = 1; }
   else if (p.kind === 'flare'){ const col = p.col === 'accent' ? PAL.accent : PAL.accent2;
     const sx = isoX(p.fx, p.fy), sy = isoY(p.fx, p.fy, 0) - p.h;
-    const g = ctx.createRadialGradient(sx, sy, 1, sx, sy, 30);
-    g.addColorStop(0, col); g.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = g; ctx.fillRect(sx - 30, sy - 30, 60, 60);
-    ctx.fillStyle = '#fff4d6'; ctx.beginPath(); ctx.arc(sx, sy, 2.4, 0, 6.29); ctx.fill(); }
+    const fl = 0.9 + 0.1 * Math.sin(perfT * 13 + p.fx * 3);
+    const g = ctx.createRadialGradient(sx, sy, 1, sx, sy, 52 * fl);
+    g.addColorStop(0, col); g.addColorStop(0.4, col); g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.globalAlpha = 0.85; ctx.fillStyle = g; ctx.fillRect(sx - 55, sy - 55, 110, 110); ctx.globalAlpha = 1;
+    ctx.fillStyle = '#fff4d6'; ctx.beginPath(); ctx.arc(sx, sy, 2.8, 0, 6.29); ctx.fill();
+    ctx.fillStyle = 'rgba(255,244,214,.5)'; ctx.beginPath(); ctx.arc(sx, sy + 3.5, 1.3, 0, 6.29); ctx.fill(); }
 }
 const drops = Array.from({ length: 110 }, () => ({ x: Math.random() * 1400, y: Math.random() * 800, s: rr(0.7, 1.3) }));
 /* ================= terrain cache: the big map is painted once, patched when scarred ================= */
@@ -2703,6 +2829,13 @@ function draw(){
   sim.soldiers.forEach(s => { if (!s.gone) items.push({ k: s.fx + s.fy + 0.3, f: () => drawMan(s) }); });
   if (sim.cat) items.push({ k: sim.cat.fx + sim.cat.fy + 0.32, f: () => drawCat() });
   if (sim.works) items.push({ k: 1e5, f: () => drawWorks() });
+  sim.searchlights.forEach(sl => items.push({ k: sl.gx + sl.gy + 0.95, f: () => {
+    const bx = isoX(sl.gx + 0.5, sl.gy + 0.5), by = isoY(sl.gx + 0.5, sl.gy + 0.5, -1);
+    ctx.strokeStyle = 'rgba(52,42,30,.95)'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(bx - 7, by); ctx.lineTo(bx, by - 30); ctx.lineTo(bx + 7, by); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(bx - 7, by - 14); ctx.lineTo(bx + 7, by - 14); ctx.stroke();
+    ctx.fillStyle = '#2c2620'; ctx.fillRect(bx - 4.5, by - 36, 9, 7);
+    ctx.fillStyle = '#574f40'; ctx.fillRect(bx - 3, by - 34.6, 6, 4); } }));
   if (sim.wallFaces) sim.wallFaces.forEach(f => { if (f.gx >= vr.x0 - 2 && f.gx <= vr.x1 + 2 && f.gy >= vr.y0 - 2 && f.gy <= vr.y1 + 2)
     items.push({ k: f.gx + f.gy + 1.55, f: () => drawNearFace(f) }); });
   sim.parts.forEach(p => items.push({ k: (p.fx ?? p.tx ?? 0) + (p.fy ?? p.ty ?? 0) + 0.5, f: () => drawPart(p) }));
@@ -2721,7 +2854,7 @@ function draw(){
     const my = (i * 97.7 + Math.sin(perfT * 0.23 + i * 1.7) * 22 + perfT * (i % 3)) % (VH + 30) - 15;
     ctx.fillRect(mx, my, i % 4 === 0 ? 2 : 1.2, i % 4 === 0 ? 2 : 1.2); }
   /* lighting: lamps burn oil, and a node with no oil goes dark */
-  const dark = (1 - simLight) * 0.84;
+  const dark = (1 - simLight) * 0.66;
   if (dark > 0.02){ LC.width = VW >> 1; LC.height = VH >> 1;
     lctx.clearRect(0, 0, LC.width, LC.height);
     lctx.fillStyle = `rgba(6,8,20,${dark})`; lctx.fillRect(0, 0, LC.width, LC.height);
@@ -2738,10 +2871,28 @@ function draw(){
     lampAt(sim.stocks.battery, 29, 46, -0.5, 90, 0.8);
     sim.map.sectors.forEach((sec, i) => lampAt(sim.stocks.sectors[i], sec.dug[0] + 1.5, 23, -1, 80, 0.85));
     lampAt(sim.stocks.hq, 31, 32.5, -1, 75, 0.8);
-    sim.parts.forEach(p => { if (p.kind === 'flare') hole(p.fx, p.fy, p.h / ZH, 150, 0.9); });
+    sim.parts.forEach(p => { if (p.kind === 'flare') hole(p.fx, p.fy, p.h / ZH, 195, 0.95); });
     sim.lights.forEach(L => hole(L.fx, L.fy, L.z, L.r, 0.95 * (1 - L.t / L.ttl)));
     lctx.globalCompositeOperation = 'source-over';
     ctx.imageSmoothingEnabled = true; ctx.drawImage(LC, 0, 0, VW, VH); }
+  if (simLight < 0.5) sim.searchlights.forEach(sl => {             // beams worry the dark
+    const [hx, hy] = w2s(sl.gx + 0.5, sl.gy + 0.5, -1);
+    const headY = hy - 33 * cam.zoom, sweep = Math.sin(sim.t * 0.1 + sl.gx * 1.7) * 0.62;
+    const ang = -Math.PI / 2 + sweep, L = 330 * cam.zoom;
+    const ex = hx + Math.cos(ang) * L, ey = headY + Math.sin(ang) * L * 0.62;
+    const px = Math.cos(ang + Math.PI / 2), py = Math.sin(ang + Math.PI / 2);
+    const w0 = 5 * cam.zoom, w1 = 52 * cam.zoom, fl = 0.9 + 0.1 * Math.sin(perfT * 7 + sl.gx);
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    const grd = ctx.createLinearGradient(hx, headY, ex, ey);
+    grd.addColorStop(0, 'rgba(255,240,190,' + (0.34 * fl) + ')'); grd.addColorStop(1, 'rgba(255,240,190,0.015)');
+    ctx.fillStyle = grd; ctx.beginPath();
+    ctx.moveTo(hx - px * w0, headY - py * w0); ctx.lineTo(ex - px * w1, ey - py * w1);
+    ctx.lineTo(ex + px * w1, ey + py * w1); ctx.lineTo(hx + px * w0, headY + py * w0); ctx.closePath(); ctx.fill();
+    const pool = ctx.createRadialGradient(ex, ey, 2, ex, ey, w1 * 1.15);
+    pool.addColorStop(0, 'rgba(255,244,200,' + (0.3 * fl) + ')'); pool.addColorStop(1, 'rgba(255,244,200,0)');
+    ctx.fillStyle = pool; ctx.beginPath(); ctx.ellipse(ex, ey, w1 * 1.15, w1 * 0.5, 0, 0, 6.29); ctx.fill();
+    ctx.fillStyle = 'rgba(255,246,205,.95)'; ctx.beginPath(); ctx.arc(hx, headY, 2.6 * cam.zoom, 0, 6.29); ctx.fill();
+    ctx.restore(); });
   ctx.fillStyle = `rgba(28,44,74,${0.04 + (1 - simLight) * 0.06})`; ctx.fillRect(0, 0, VW, VH);
   if (sim.t < 8){ ctx.globalAlpha = Math.min(1, sim.t / 1.4, (8 - sim.t) / 3);
     ctx.fillStyle = PAL.moon; ctx.font = '26px Georgia'; ctx.textAlign = 'center';
@@ -2772,7 +2923,7 @@ function newSim(planetName, seedStr){
     jobs: [], jobT: 0, projT: 25, project: null, sapDone: false, sapPost: null, avgDamage: 0,
     directorT: 14, shake: 0, df: 0, speedK: 1, dawnDone: false, pendingRookie: 0, rookieGreeter: 0,
     stars: Array.from({ length: 120 }, () => ({ x: rng(), y: rng() * 0.55, r: rr(0.8, 1.9), b: rr(0.4, 1) })),
-    ledger: [], wireCut: null, order: null, pendingAssign: null, queue: [], freshScars: {}, works: null, worksCycle: 0, cat: { fx: 44.5, fy: 36.4, z: 0, mode: 'sit', t: 3, tx: 44.5, ty: 36.4, faceA: 0 },
+    ledger: [], intel: [{ dmg: 0, ammo: 8, t: 0 }, { dmg: 0, ammo: 8, t: 0 }, { dmg: 0, ammo: 8, t: 0 }], intelWire: { down: false, t: 0 }, inflight: [], radioRetry: [], repT: 25, wireCut: null, order: null, pendingAssign: null, queue: [], freshScars: {}, works: null, worksCycle: 0, searchlights: [], cat: { fx: 44.5, fy: 36.4, z: 0, mode: 'sit', t: 3, tx: 44.5, ty: 36.4, faceA: 0 },
     bunkTaken: new Set(), bedTaken: new Set(), bearerJobs: [], spotted: null,
     missionQ: [], emMissionQ: [], dramaT: rr(26, 44), orderT: rr(50, 90), logisticsT: 4, batteryT: 2, talkT: 6,
     cart: { active: false, fx: -6, dir: 1, t: rr(24, 44) },
