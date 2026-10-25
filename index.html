@@ -400,7 +400,12 @@ function paintTileShapes(gx, gy){
     const nE = tileAt(gx + 1, gy);
     if (!trenchLike(nE) || nE.z > t.z) wallFace(isoX(gx + 1, gy), isoY(gx + 1, gy, 0), isoX(gx + 1, gy + 1), isoY(gx + 1, gy + 1, 0),
       isoX(gx + 1, gy + 1), isoY(gx + 1, gy + 1, t.z), isoX(gx + 1, gy), isoY(gx + 1, gy, t.z));
-    if (t.type === 'trench' && hash2(gx * 1.7, gy * 2.3) < 0.55){                    // duckboards underfoot
+    if (t.type === 'trench' && t.boards){                                  // laid duckboards: planks over the mud
+      ctx.strokeStyle = 'rgba(104,80,50,.75)'; ctx.lineWidth = 2.6;
+      for (let bI = -1; bI <= 1; bI++){ ctx.beginPath(); ctx.moveTo(cx - 7, cy - 3 + bI * 3.4); ctx.lineTo(cx + 7, cy + 3 + bI * 3.4); ctx.stroke(); }
+      ctx.strokeStyle = 'rgba(70,54,34,.6)'; ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.moveTo(cx - 9, cy - 4.4); ctx.lineTo(cx + 9, cy + 4.4); ctx.stroke(); }
+    else if (t.type === 'trench' && hash2(gx * 1.7, gy * 2.3) < 0.55){                    // a plank or two, dropped long ago
       ctx.strokeStyle = 'rgba(96,74,48,.4)'; ctx.lineWidth = 2.2;
       ctx.beginPath(); ctx.moveTo(cx - 6, cy - 2.6); ctx.lineTo(cx + 6, cy + 2.6); ctx.stroke(); }
     if (t.type === 'trench' && gy === trenchY(gx)){                                  // the sandbag lip faces the enemy
@@ -409,6 +414,11 @@ function paintTileShapes(gx, gy){
       for (let r = 0; r < bagRows; r++) for (let i = 0; i < 5; i++){ if (hash2(gx * 3.7, i * 9.1 + r * 3.7) < 0.22) continue;
         const bx = cx - 16 + i * 7.6 + hash2(gx, i * 3.3 + r) * 3;
         ctx.beginPath(); ctx.ellipse(bx, cy - 15.2 - r * 3.1 + hash2(i * 1.7, gy + r) * 2.2, 4.3, 1.6, 0, 0, 6.29); ctx.fill(); } }
+    if (t.type === 'trench' && t.recess){                                  // the ammunition recess: crates in a dug alcove
+      ctx.fillStyle = 'rgba(30,22,14,.55)'; ctx.beginPath(); ctx.ellipse(cx + 8, cy - 10, 9, 3.6, 0, 0, 6.29); ctx.fill();
+      ctx.fillStyle = '#6b543a'; ctx.fillRect(cx + 3, cy - 14, 9, 5);
+      ctx.fillStyle = '#7d6547'; ctx.fillRect(cx + 5, cy - 18, 7, 4);
+      ctx.fillStyle = 'rgba(179,86,47,.85)'; ctx.fillRect(cx + 7.4, cy - 13.4, 2.2, 2.2); }
     if (t.type === 'dug' && hash2(gx * 3.1, gy * 1.3) < 0.55){                        // timber banding in the rooms
       ctx.strokeStyle = 'rgba(96,74,48,.4)'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.moveTo(cx - 13, cy - 6); ctx.lineTo(cx + 13, cy + 6); ctx.stroke(); }
@@ -519,6 +529,7 @@ function soldierMove(s, dt){
               s.state === 'drag' ? 0.34 : s.enemy ? 0.52 : s.speed) * (s.enemy ? 1 : (sim.speedK || 1));
   const tileHere = tileAt(Math.floor(s.fx), Math.floor(s.fy));
   if (tileHere && tileHere.rubble > 0.3) sp *= 0.55;                       // rubble is slow going
+  if (tileHere && tileHere.boards && sim.water > 2.5) sp *= 1.18;          // boards beat mud
   if (s.stance === 'crouch') sp *= 0.72;                                   // a crouch is careful, not quick
   const tKey = Math.floor(s.fx) + ',' + Math.floor(s.fy);                  // feet wear the ground dark
   if (s.lastTile !== tKey){ s.lastTile = tKey; if (tileHere) tileHere.worn = Math.min(1, tileHere.worn + 0.045); }
@@ -564,6 +575,8 @@ function soldierMove(s, dt){
   if (!s.climbing) s.z += (tz - s.z) * Math.min(1, dt * 7);
   // mud at the heel
   if (sp > 0.4 && rng() < dt * 5) sim.parts.push({ kind:'dirt', fx: s.fx, fy: s.fy, z: s.z, ox: rr(-3, 3), oy: 0, h: 1.6, vx: rr(-7, 7), vy: rr(-2, 2), vh: rr(14, 30), life: rr(.25, .45), t: 0, col: PAL.soilDark, r: rr(0.8, 1.5) });
+  if (sp > 0.4 && sim.water > 4 && tileHere && tileHere.type === 'crater' && rng() < dt * 7)  // a flooded crater answers the boot
+    sim.parts.push({ kind:'dirt', fx: s.fx, fy: s.fy, z: s.z, ox: rr(-3, 3), oy: 0, h: 2.2, vx: rr(-9, 9), vy: rr(-3, 3), vh: rr(20, 42), life: rr(.2, .4), t: 0, col: '#aeb9ba', r: rr(0.7, 1.3) });
 }
 function arrive(s){
   s.settleT = perfT;
@@ -929,6 +942,12 @@ function drawMan(s){
 /* ================= props ================= */
 function buildProps(){
   const P = [], A = sim.map.anchors;
+  /* what is left of the wood that stood here, and of one cart that did not get back */
+  for (let i = 0; i < 13; i++) P.push({ kind: 'stump', fx: ri(5, 88) + 0.5, fy: ri(8, 17) + 0.5, z: 0, variant: ri(0, 2) });
+  for (let i = 0; i < 3; i++) P.push({ kind: 'stump', fx: ri(8, 84) + 0.5, fy: ri(23, 30) + 0.5, z: 0, variant: ri(0, 2) });
+  for (let i = 0; i < 5; i++) P.push({ kind: 'trunk', fx: ri(6, 86) + 0.5, fy: ri(9, 16) + 0.5, z: 0, variant: ri(0, 1) });
+  P.push({ kind: 'wreck', fx: ri(14, 78) + 0.5, fy: ri(11, 15) + 0.5, z: 0 });
+  P.push({ kind: 'wreck', fx: ri(18, 72) + 0.5, fy: 50.4, z: 0 });
   P.push({ kind:'pot', fx: A.cookPot[0] + 0.5, fy: A.cookPot[1] + 0.5, z: 0 });
   P.push({ kind:'stove', fx: 45.5, fy: 35.5, z: 0 });
   P.push({ kind:'pump', fx: 47.5, fy: 36.5, z: 0 });
@@ -1245,6 +1264,22 @@ function propSprite(kind, variant, frame){
     if (variant === 0){ T.blob(7.4, 9, 5.6, 7.4, 'stone', 1); T.blob(7.4, 5.4, 4.4, 3.4, 'stone', 2); }
     else if (variant === 1){ T.rect(6.6, 3, 8.4, 16, 'timber', 0); T.rect(3.4, 5.6, 11.4, 7.4, 'timber', 0); }
     else { T.rect(7, 7, 8.2, 16, 'timber', 0); T.blob(7.6, 5.4, 4.6, 3.2, 'steel', 0); T.line(3.4, 6.4, 11.8, 6.4, 1.2, 'steel', 0); } });
+  else if (kind === 'stump') spr = A(16, 20, T => {
+    T.rect(6.4, 9, 10.2, 19, 'timber', 0); T.rect(6.4, 9, 7.6, 19, 'dark', 1);
+    T.rect(6.2, 6.4, 7.4, 9.4, 'timber', 0); T.rect(8.8, 4.6, 10.2, 9.4, 'timber', 1); T.rect(7.5, 7.2, 8.7, 9.6, 'pale', 2);
+    T.line(7, 5.4, 7.6, 8.6, 0.9, 'pale', 2); T.line(9.6, 3.8, 9.2, 8.2, 0.9, 'pale', 1);
+    T.blob(4.6, 18.6, 2.6, 1, 'dark', 0); T.blob(11.6, 18.8, 2.8, 1, 'dark', 0); });
+  else if (kind === 'trunk') spr = A(34, 12, T => {
+    T.rect(2, 5.4, 31, 9.2, 'timber', 0); T.rect(2, 7.6, 31, 9.2, 'dark', 1);
+    T.rect(2, 5.4, 4.6, 9.2, 'pale', 1); T.rect(2.8, 6.2, 3.8, 8.4, 'timber', 2);
+    T.line(11, 5.6, 12.6, 2.6, 1.3, 'timber', 0); T.line(21, 5.6, 20, 3, 1.2, 'dark', 0);
+    T.line(30.4, 6, 33, 4.4, 0.9, 'pale', 1); T.line(30.4, 8.4, 33.4, 9.6, 0.9, 'pale', 1); });
+  else if (kind === 'wreck') spr = A(30, 20, T => {
+    T.blob(8, 15.6, 3.4, 3.4, 'dark', 0); T.blob(23, 16.4, 3, 3, 'dark', 0);
+    T.blob(8, 15.6, 1.2, 1.2, 'steel', 1); T.blob(23, 16.4, 1, 1, 'steel', 1);
+    T.line(5, 12.4, 24, 8.6, 2.2, 'timber', 0); T.line(6, 14.6, 25, 10.8, 1.6, 'dark', 1);
+    T.line(10, 11.6, 9, 6.8, 1.4, 'timber', 1); T.line(18, 9.8, 21, 5.6, 1.4, 'timber', 0);
+    T.line(24, 8.6, 28.6, 15.8, 1.3, 'timber', 0); });
   else if (kind === 'vane') spr = A(19, 25, T => {
     T.rect(8.8, 8, 10.2, 24, 'alloy', 0);
     T.line(9.4, 8, 2.4, 4.6, 1.6, 'alloy', 1); T.line(9.4, 8, 16.4, 3, 1.6, 'alloy', 1);
@@ -1268,7 +1303,7 @@ const PROP_DRAW = { pot:[36, 29, 2], stove:[40, 42, 2], pump:[24, 29, 1], phone:
   crossAid:[19, 45, 0], bed:[40, 14, 0], wallseg:[48, 27, 0], screen:[38, 26, 0], banner:[26, 48, 0],
   ladder:[20, 40, -14], hatch:[35, 19, -2], wire:[25, 22, 0], mast:[22, 66, 0], barrel:[17, 19, 0],
   planks:[40, 11, 0], grave:[19, 22, 0], vane:[24, 32, 0], crate:[23, 19, 0],
-  flagBig:[47, 68, 0], flagEnemy:[23, 36, 0], flagSec:[23, 36, 0], flagAid:[23, 36, 0] };
+  flagBig:[47, 68, 0], flagEnemy:[23, 36, 0], flagSec:[23, 36, 0], flagAid:[23, 36, 0], stump:[24, 30, 0], trunk:[46, 16, 0], wreck:[44, 30, 0] };
 function drawProp(p){
   const sx = isoX(p.fx, p.fy), sy = isoY(p.fx, p.fy, p.z);
   const put = (kind, variant, frame, dx, dy) => { const spr = propSprite(kind, variant, frame); if (!spr) return;
@@ -1721,9 +1756,9 @@ function regenJobs(){
       if ((t.damage >= 0.3 || t.rubble >= 0.3) && !held.has('repair:' + gx + ',' + gy)) jobs.push({ type:'repair', gx, gy, t: rr(4, 8) }); }
     else if (t.type === 'crater' && !t.filled && gy >= 17 && fills < 2 && !held.has('fill:' + gx + ',' + gy)){ jobs.push({ type:'fill', gx, gy, t: rr(5, 9) }); fills++; } }
   sim.avgDamage = dmgN ? dmgSum / dmgN : 0;
-  if (sim.works){ const W = sim.works;
-    const n = sim.soldiers.filter(s => s.job && s.job.type === 'work').length;
-    for (let i = n; i < 3; i++) jobs.unshift({ type: 'work', gx: W.gx, gy: W.gy, t: 1e6 }); }
+  [[sim.works, 1], [sim.works2, 2]].forEach(([W, slot]) => { if (!W) return;
+    const n = sim.soldiers.filter(s => s.job && s.job.type === 'work' && s.job.gx === W.gx && s.job.gy === W.gy).length;
+    for (let i = n; i < 3; i++) jobs.unshift({ type: 'work', gx: W.gx, gy: W.gy, t: 1e6, slot }); });
   if (sim.project){ const P = sim.project;
     const stand = P.idx === 0 ? [P.gx, trenchY(P.gx)] : P.tiles[P.idx - 1];
     const n = sim.soldiers.filter(s => s.job && s.job.type === 'project').length;
@@ -1731,9 +1766,9 @@ function regenJobs(){
   sim.dmgSec = dmgSec;
   const wire = sim.wireCut, worstSec = dmgSec.indexOf(Math.max(dmgSec[0], dmgSec[1], dmgSec[2]));
   const prioOf = j => { if (wire && Math.abs(j.gx - wire[0]) <= 3 && Math.abs(j.gy - wire[1]) <= 3) return 0;
-    if (j.type === 'repair') return (j.gx < 33 ? 0 : j.gx < 61 ? 1 : 2) === worstSec ? 1 : 4;
+    if (j.type === 'work') return 1;
+    if (j.type === 'repair') return (j.gx < 33 ? 0 : j.gx < 61 ? 1 : 2) === worstSec ? 2 : 4;
     if (j.type === 'project') return 2;
-    if (j.type === 'work') return 3;
     return 5; };
   jobs.sort((a, b) => prioOf(a) - prioOf(b));
   sim.jobs = jobs;
@@ -1756,6 +1791,18 @@ function siteWorks(kind){
       if (t && t.type === 'trench' && !sim.searchlights.some(sl => Math.abs(sl.gx - gx) < 14))
         return { kind, tiles: [[gx, gy]], stage: 1, prog: 0, need: 12, gx, gy, text: 'A working party starts on a searchlight platform behind the line.' }; }
     return null; }
+  if (kind === 'duckboards'){ const sec = sim.map.sectors[ri(0, 2)];
+    for (let gx = sec.x0 + 2; gx <= sec.x1 - 7; gx++){ const tiles = [];
+      let ok = true; for (let i = 0; i < 8; i++){ const y = supportY(gx + i); const t = tileAt(gx + i, y); if (!t || t.type !== 'trench' || t.boards){ ok = false; break; } tiles.push([gx + i, y]); }
+      if (ok) return { kind, tiles, stage: 1, prog: 0, need: 12, gx: tiles[3][0], gy: tiles[3][1],
+        text: 'A working party starts laying duckboards along the support trench in sector ' + 'ABC'[sim.map.sectors.indexOf(sec)] + '.' }; }
+    return null; }
+  if (kind === 'recess'){ const sec = sim.map.sectors[ri(0, 2)];
+    for (let gx = sec.x0 + 3; gx <= sec.x1 - 4; gx++){ const y = trenchY(gx); const tiles = [];
+      let ok = true; for (let i = 0; i < 3; i++){ const t = tileAt(gx + i, y); if (!t || t.type !== 'trench' || t.recess){ ok = false; break; } tiles.push([gx + i, y]); }
+      if (ok) return { kind, tiles, stage: 1, prog: 0, need: 10, gx: tiles[1][0], gy: y,
+        text: 'Sappers dig an ammunition recess into the fire bay in sector ' + 'ABC'[sim.map.sectors.indexOf(sec)] + '.' }; }
+    return null; }
   const gy = 14 + ri(0, 1);
   for (let gx = 8; gx <= 80; gx++){ const tiles = [];
     let ok = true; for (let i = 0; i < 8; i++){ const t = tileAt(gx + i, gy); if (!t || t.type !== 'ground'){ ok = false; break; } tiles.push([gx + i, gy]); }
@@ -1763,15 +1810,19 @@ function siteWorks(kind){
   return null;
 }
 function worksTick(){
-  if (sim.works || sim.t < 500 || sim.raid.active || sim.stocks.depot.timber < 6) return;
-  const kinds = ['parapet', 'dugout', 'wire', 'searchlight'];
-  for (let k = 0; k < 4; k++){ const W = siteWorks(kinds[(sim.worksCycle + k) % 4]);
-    if (W){ sim.works = W; sim.worksCycle += k + 1; logEvent('work', W.text); (sim.__wlog = sim.__wlog || []).push('started ' + W.kind + ' at ' + W.gx + ',' + W.gy + ' t=' + Math.round(sim.t)); return; } }
+  if (sim.raid.active || sim.stocks.depot.timber < 6 || sim.t < 500) return;
+  const kinds = ['parapet', 'dugout', 'wire', 'searchlight', 'duckboards', 'recess'];
+  if (!sim.works){ for (let k = 0; k < 6; k++){ const W = siteWorks(kinds[(sim.worksCycle + k) % 6]);
+      if (W){ sim.works = W; sim.worksCycle += k + 1; logEvent('work', W.text); (sim.__wlog = sim.__wlog || []).push('started ' + W.kind + ' at ' + W.gx + ',' + W.gy + ' t=' + Math.round(sim.t)); return; } } return; }
+  if (!sim.works2 && sim.t > 1600 && (sim.avgDamage || 0) < 0.05 && sim.stocks.depot.timber >= 10){
+    for (let k = 0; k < 6; k++){ const W = siteWorks(kinds[(sim.worksCycle + 2 + k) % 6]);
+      if (W && W.kind !== sim.works.kind){ sim.works2 = W; logEvent('work', W.text);
+        (sim.__wlog = sim.__wlog || []).push('started second ' + W.kind + ' at ' + W.gx + ',' + W.gy + ' t=' + Math.round(sim.t)); return; } } }
 }
 function worksWork(s, j, dt){
   sim.__ww = (sim.__ww || 0) + 1;
   if (sim.__ww === 1) (sim.__wlog = sim.__wlog || []).push('first worksWork by ' + s.id + ' at t=' + Math.round(sim.t));
-  const W = sim.works; if (!W){ s.job = null; return; }
+  const W = j.slot === 2 ? sim.works2 : sim.works; if (!W){ s.job = null; return; }
   W.prog += dt * (0.7 + s.skill * 0.6);
   if (W.prog < W.need) return;
   W.prog = 0;
@@ -1782,6 +1833,10 @@ function worksWork(s, j, dt){
     logEvent('work', 'The searchlight is up. At night its beam worries the dark.'); }
   if (W.kind === 'wire' && PROP_DRAW.wire) W.tiles.slice((doneStage - 1) * 3, doneStage * 3 + 1)
     .forEach(([x, y]) => sim.props.push({ kind: 'wire', fx: x + 0.5, fy: y + 0.5, z: 0 }));
+  if (W.kind === 'duckboards') W.tiles.slice((doneStage - 1) * 3, Math.min(W.tiles.length, doneStage * 3))
+    .forEach(([x, y]) => { const t = tileAt(x, y); if (t){ t.boards = 1; markDirty(x, y); } });
+  if (W.kind === 'recess'){ W.tiles.forEach(([x, y]) => { const t = tileAt(x, y); if (t){ t.recess = doneStage; markDirty(x, y); } });
+    if (doneStage >= 3){ const secI = W.gx < 33 ? 0 : W.gx < 61 ? 1 : 2; sim.stocks.sectors[secI].ammo += 3; } }
   if (doneStage < 3){ W.stage++; (sim.__wlog = sim.__wlog || []).push(W.kind + ' stage ' + W.stage + ' at t=' + Math.round(sim.t)); return; }
   if (W.kind === 'dugout'){ W.tiles.forEach(([x, y]) => { const t = tileAt(x, y); if (t){ t.type = 'dug'; markDirty(x, y); } });
     sim.map.bunkTiles.push(W.tiles[0], W.tiles[3]);
@@ -1789,11 +1844,14 @@ function worksWork(s, j, dt){
     sim.props.push({ kind: 'bed', fx: W.tiles[3][0] + 0.5, fy: W.tiles[3][1] + 0.5, z: 0 });
     logEvent('work', 'The new dugout is roofed and dry. Two more bunks in the line.'); }
   else if (W.kind === 'parapet') logEvent('work', 'The parapet stands a course higher where the work party finished.');
+  else if (W.kind === 'duckboards') logEvent('work', 'The duckboards are down. Boots on boards instead of mud.');
+  else if (W.kind === 'recess') logEvent('work', 'The new recess is stacked and ready, close to the rifles.');
   else logEvent('work', 'The wire apron is thicker tonight.');
-  sim.works = null; s.job = null;
+  if (j.slot === 2) sim.works2 = null; else sim.works = null;
+  s.job = null;
 }
-function drawWorks(){
-  const W = sim.works; if (!W) return;
+function drawWorks(){ drawOneWorks(sim.works); drawOneWorks(sim.works2); }
+function drawOneWorks(W){ if (!W) return;
   const xs = W.tiles.map(t => t[0]), ys = W.tiles.map(t => t[1]);
   const x0 = Math.min(...xs), x1 = Math.max(...xs) + 1, y0 = Math.min(...ys), y1 = Math.max(...ys) + 1;
   const corners = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map(([gx, gy]) => [isoX(gx, gy), isoY(gx, gy, 0)]);
@@ -2861,6 +2919,17 @@ function paintGroundLayers(rect){
   [18, 46, 74].forEach(cgx => { for (let gy = 21; gy <= 50; gy++){ const px = isoX(cgx + 0.5, gy + 0.5), py = isoY(cgx + 0.5, gy + 0.5, 0);
     if (!inR(px, py, 60)) continue;
     ctx.beginPath(); ctx.ellipse(px, py, 26, 8, 0, 0, 6.29); ctx.fill(); } });
+  /* moor and chalk: the world is not one brown */
+  for (let i = 0; i < 110; i++){ const bx = (R() - 0.05) * 4800, by = R() * 2450 - 40;
+    if (!inR(bx, by, 150)) continue;
+    const gx2 = Math.floor((bx / 32 + by / 16) / 2), gy2 = Math.floor((by / 16 - bx / 32) / 2);
+    const tt = (gx2 >= 0 && gy2 >= 0 && gx2 < MW && gy2 < MH) ? sim.grid[gy2][gx2] : null;
+    if (!tt || tt.type !== 'ground') continue;
+    const chalk = gy2 < 19 && R() < 0.5;
+    ctx.fillStyle = chalk ? 'rgba(168,158,128,1)' : (R() < 0.5 ? 'rgba(106,110,78,1)' : 'rgba(122,116,92,1)');
+    ctx.globalAlpha = 0.05 + R() * 0.06;
+    ctx.beginPath(); ctx.ellipse(bx, by, 60 + R() * 130, 22 + R() * 44, R() * 0.6 - 0.3, 0, 6.29); ctx.fill(); }
+  ctx.globalAlpha = 1;
 }
 function paintRoadBand(){
   ctx.fillStyle = 'rgba(38,30,20,.5)'; ctx.beginPath();
@@ -3114,7 +3183,7 @@ function newSim(planetName, seedStr){
     jobs: [], jobT: 0, projT: 25, project: null, sapDone: false, sapPost: null, avgDamage: 0,
     directorT: 14, shake: 0, df: 0, speedK: 1, dawnDone: false, pendingRookie: 0, rookieGreeter: 0,
     stars: Array.from({ length: 120 }, () => ({ x: rng(), y: rng() * 0.55, r: rr(0.8, 1.9), b: rr(0.4, 1) })),
-    ledger: [], intel: [{ dmg: 0, ammo: 8, t: 0 }, { dmg: 0, ammo: 8, t: 0 }, { dmg: 0, ammo: 8, t: 0 }], intelWire: { down: false, t: 0 }, inflight: [], radioRetry: [], repT: 25, wireCut: null, order: null, pendingAssign: null, queue: [], freshScars: {}, works: null, worksCycle: 0, searchlights: [], moonOff: hash2(hashStr(seedStr + '|' + planetName), 5.1) * 29.5, cat: { fx: 44.5, fy: 36.4, z: 0, mode: 'sit', t: 3, tx: 44.5, ty: 36.4, faceA: 0 },
+    ledger: [], intel: [{ dmg: 0, ammo: 8, t: 0 }, { dmg: 0, ammo: 8, t: 0 }, { dmg: 0, ammo: 8, t: 0 }], intelWire: { down: false, t: 0 }, inflight: [], radioRetry: [], repT: 25, wireCut: null, order: null, pendingAssign: null, queue: [], freshScars: {}, works: null, works2: null, worksCycle: 0, searchlights: [], moonOff: hash2(hashStr(seedStr + '|' + planetName), 5.1) * 29.5, cat: { fx: 44.5, fy: 36.4, z: 0, mode: 'sit', t: 3, tx: 44.5, ty: 36.4, faceA: 0 },
     bunkTaken: new Set(), bedTaken: new Set(), bearerJobs: [], spotted: null,
     missionQ: [], emMissionQ: [], dramaT: rr(26, 44), orderT: rr(50, 90), logisticsT: 4, batteryT: 2, talkT: 6,
     cart: { active: false, fx: -6, dir: 1, t: rr(24, 44) },
