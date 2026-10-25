@@ -3251,6 +3251,11 @@ function update(dt){
 
 /* ================= drawing the world ================= */
 const LC = document.createElement('canvas'), lctx = LC.getContext('2d');
+const GRAINS = [0, 1, 2].map(k => { const c = document.createElement('canvas'); c.width = c.height = 128;
+  const x = c.getContext('2d'), im = x.createImageData(128, 128); let sd = 987123 + k * 7919;
+  const rnd = () => (sd = (sd * 16807) % 2147483647) / 2147483647;
+  for (let i = 0; i < im.data.length; i += 4){ const v = rnd() > 0.5 ? 255 : 0; im.data[i] = im.data[i + 1] = im.data[i + 2] = v; im.data[i + 3] = 34; }
+  x.putImageData(im, 0, 0); return c; });
 function w2s(fx, fy, z){ return [ (isoX(fx, fy) - cam.x) * cam.zoom + VW / 2, (isoY(fx, fy, z) - cam.y) * cam.zoom + VH / 2 ]; }
 function drawSky(){
   const top = simLight > 0.03 ? PAL.skyDay : PAL.skyNight;
@@ -3566,17 +3571,19 @@ function draw(){
   for (let i = 0; i < 42; i++){ const mx = (i * 173.3 + perfT * (3 + (i % 5)) + Math.sin(perfT * 0.4 + i * 2.2) * 14) % (VW + 40) - 20;
     const my = (i * 97.7 + Math.sin(perfT * 0.23 + i * 1.7) * 22 + perfT * (i % 3)) % (VH + 30) - 15;
     ctx.fillRect(mx, my, i % 4 === 0 ? 2 : 1.2, i % 4 === 0 ? 2 : 1.2); }
-  /* lighting: lamps burn oil, and a node with no oil goes dark */
+  /* lighting 5.0.2: lamplight is warm, uneven and alive; lamps burn oil, and a node with no oil goes dark */
   const dark = (1 - simLight) * 0.5 * (1 - moonLight * 1.55);
   if (dark > 0.02){ LC.width = VW >> 1; LC.height = VH >> 1;
     lctx.clearRect(0, 0, LC.width, LC.height);
-    lctx.fillStyle = `rgba(6,8,20,${dark})`; lctx.fillRect(0, 0, LC.width, LC.height);
-    lctx.globalCompositeOperation = 'destination-out';
-    const hole = (fx, fy, z, r, str) => { const [sx, sy] = w2s(fx, fy, z);
-      const g = lctx.createRadialGradient(sx / 2, sy / 2, 1, sx / 2, sy / 2, r * cam.zoom / 2);
-      g.addColorStop(0, `rgba(0,0,0,${str})`); g.addColorStop(1, 'rgba(0,0,0,0)');
-      lctx.fillStyle = g; lctx.fillRect(sx / 2 - r, sy / 2 - r, r * 2, r * 2); };
-    const lampAt = (node, fx, fy, z, r, str) => { if (!node || node.oil > 0.02) hole(fx, fy, z, r, str); };
+    const amb = lctx.createLinearGradient(0, 0, 0, LC.height);
+    amb.addColorStop(0, `rgba(14,16,32,${dark * 0.84})`); amb.addColorStop(0.55, `rgba(6,8,20,${dark})`); amb.addColorStop(1, `rgba(3,4,12,${Math.min(1, dark * 1.1)})`);
+    lctx.fillStyle = amb; lctx.fillRect(0, 0, LC.width, LC.height);
+    const lh = (a, b) => { let h = (Math.round(a) * 374761393 + Math.round(b) * 668265263) ^ 0x5bf03635; h = Math.imul(h ^ (h >> 13), 1274126177); return ((h ^ (h >> 16)) >>> 0) / 4294967295; };
+    const flick = ph => { const a = Math.sin(perfT * 9.3 + ph * 12.9), b = Math.sin(perfT * 23.7 + ph * 31.7), c = Math.sin(perfT * 1.31 + ph * 47.3);
+      return Math.max(0.6, 1 + 0.055 * a + 0.04 * b - (c > 0.86 ? (c - 0.86) * 2.1 : 0)); };
+    const pts = [];
+    const lampAt = (node, fx, fy, z, r, str) => { if (node && node.oil <= 0.02) return;
+      pts.push([fx, fy, z, r * (0.9 + lh(fx, fy) * 0.24), str, lh(fy, fx) * 6.28, 1]); };
     lampAt(sim.stocks.hq, 55.5, 39.5, -1, 110, 0.95);
     lampAt(sim.stocks.aid, 73, 38, 0, 100, 0.9);
     lampAt(sim.stocks.cook, 44, 35, 0, 95, 0.9);
@@ -3585,16 +3592,45 @@ function draw(){
     sim.map.sectors.forEach((sec, i) => lampAt(sim.stocks.sectors[i], sec.dug[0] + 1.5, 23, -1, 80, 0.85));
     sim.map.sectors.forEach((sec, i) => lampAt(sim.stocks.sectors[i], sec.comm + 0.5, trenchY(sec.comm) + 0.5, -1, 82, 0.82));
     lampAt(sim.stocks.hq, 31, 32.5, -1, 75, 0.8);
-    sim.parts.forEach(p => { if (p.kind === 'flare') hole(p.fx, p.fy, p.h / ZH, 195, 0.95); });
-    sim.lights.forEach(L => hole(L.fx, L.fy, L.z, L.r, 0.95 * (1 - L.t / L.ttl)));
+    if (simLight < 0.5) for (const s of sim.soldiers){
+      if (s.enemy || s.dead || s.inBed || s.carriedBy || s.state === 'down' || s.state === 'sleep') continue;
+      if (!(s.path && s.path.length) && s.state !== 'drag' && s.state !== 'carry') continue;
+      const lk = kgLook(s); if (!lk || !lk.lamp) continue;
+      const tt = tileAt(s.fx, s.fy); if (tt && tt.type === 'dug') continue;
+      let st = null;
+      if (s.fy < 27) st = sim.stocks.sectors[s.fx < 33 ? 0 : s.fx < 61 ? 1 : 2];
+      else { let bd = 1e9; [[15, 43, sim.stocks.depot], [44, 35, sim.stocks.cook], [55.5, 39.5, sim.stocks.hq], [73, 38, sim.stocks.aid], [29, 46, sim.stocks.battery]].forEach(([nx, ny, ns]) => { const d2 = (s.fx - nx) * (s.fx - nx) + (s.fy - ny) * (s.fy - ny); if (d2 < bd){ bd = d2; st = ns; } }); }
+      if (!st || st.oil <= 0.02) continue;
+      pts.push([s.fx, s.fy, s.z, 38, 0.6, (s.id % 89) / 89 * 6.28, 1]); }
+    sim.parts.forEach(p => { if (p.kind === 'flare') pts.push([p.fx, p.fy, p.h / ZH, 195, 0.95, 0, 0]); });
+    sim.lights.forEach(L => pts.push([L.fx, L.fy, L.z, L.r, 0.95 * (1 - L.t / L.ttl), 0, 0]));
+    lctx.globalCompositeOperation = 'destination-out';
+    for (const [fx, fy, z, r, str, ph] of pts){ const [sx, sy] = w2s(fx, fy, z);
+      const f = ph ? flick(ph) : 1, R = r * cam.zoom / 2 * (ph ? 0.92 + 0.14 * f : 1), cx = sx / 2, cy = sy / 2;
+      const g = lctx.createRadialGradient(cx, cy, 1, cx, cy, R * 1.5);
+      g.addColorStop(0, `rgba(0,0,0,${Math.min(1, str * f)})`); g.addColorStop(0.42, `rgba(0,0,0,${(str * f * 0.52).toFixed(3)})`); g.addColorStop(1, 'rgba(0,0,0,0)');
+      lctx.fillStyle = g; lctx.fillRect(cx - R * 1.5, cy - R * 1.5, R * 3, R * 3); }
     lctx.globalCompositeOperation = 'source-over';
-    ctx.imageSmoothingEnabled = true; ctx.drawImage(LC, 0, 0, VW, VH); }
-  if (moonLight > 0.03 && simLight < 0.45){ /* moonlight lies on the field in a slow silver pool */
+    const gn = GRAINS[((perfT * 2) | 0) % 3]; lctx.globalAlpha = 0.1 + dark * 0.12;
+    const gox = ((perfT * 29) | 0) % 128, goy = ((perfT * 17) | 0) % 128;
+    for (let px = -gox; px < LC.width; px += 128) for (let py = -goy; py < LC.height; py += 128) lctx.drawImage(gn, px, py);
+    lctx.globalAlpha = 1;
+    ctx.imageSmoothingEnabled = true; ctx.drawImage(LC, 0, 0, VW, VH);
+    ctx.save();
+    for (const [fx, fy, z, r, str, ph, wm] of pts){ if (!wm) continue; const [sx, sy] = w2s(fx, fy, z);
+      const f = ph ? flick(ph) : 1, R = r * cam.zoom * 0.85;
+      const g = ctx.createRadialGradient(sx, sy, 1, sx, sy, R);
+      g.addColorStop(0, `rgba(255,166,66,${(0.3 * str * f).toFixed(3)})`); g.addColorStop(1, 'rgba(255,166,66,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(sx, sy, R, 0, 6.29); ctx.fill(); }
+    ctx.restore(); }
+  if (moonLight > 0.03 && simLight < 0.45){ /* moonlight lies on the field in slow silver pools, edges torn like cloud */
     const np2 = ((sim.hour + 24 - 18.5) % 24) / 12, mxp = VW * (0.16 + 0.68 * np2), myp = VH * (0.42 + 0.2 * Math.sin(np2 * 3.1416));
     ctx.save(); ctx.globalCompositeOperation = 'lighter';
-    const mg = ctx.createRadialGradient(mxp, myp, 8, mxp, myp, VW * 0.42);
-    mg.addColorStop(0, 'rgba(186,200,228,' + (moonLight * 0.3) + ')'); mg.addColorStop(1, 'rgba(186,200,228,0)');
-    ctx.fillStyle = mg; ctx.beginPath(); ctx.ellipse(mxp, myp, VW * 0.42, VH * 0.3, 0, 0, 6.29); ctx.fill(); ctx.restore(); }
+    [[0, 0, 1, 0.3], [VW * 0.11, VH * 0.05, 0.72, 0.2], [-VW * 0.1, VH * 0.07, 0.6, 0.17]].forEach(([ox, oy, sc, al]) => {
+      const mg = ctx.createRadialGradient(mxp + ox, myp + oy, 8, mxp + ox, myp + oy, VW * 0.42 * sc);
+      mg.addColorStop(0, 'rgba(186,200,228,' + (moonLight * al) + ')'); mg.addColorStop(1, 'rgba(186,200,228,0)');
+      ctx.fillStyle = mg; ctx.beginPath(); ctx.ellipse(mxp + ox, myp + oy, VW * 0.42 * sc, VH * 0.3 * sc, 0, 0, 6.29); ctx.fill(); });
+    ctx.restore(); }
   if (simLight < 0.5) sim.searchlights.forEach(sl => {             // beams worry the dark
     const [hx, hy] = w2s(sl.gx + 0.5, sl.gy + 0.5, -1);
     const headY = hy - 33 * cam.zoom, sweep = Math.sin(sim.t * 0.1 + sl.gx * 1.7) * 0.62;
