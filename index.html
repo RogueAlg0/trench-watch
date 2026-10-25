@@ -57,6 +57,14 @@
 .obitFace { width: 46px; height: 46px; flex: none; border: 1px solid rgba(60,50,25,.45); background: #d9cfb0; image-rendering: pixelated; }
 </style>
 <div id="graveCard"><button class="wclose" id="graveClose">&#215;</button><div class="gHead">FROM THE ROLL</div><div id="graveBody"></div></div>
+<style>
+#manCard { position: fixed; z-index: 60; left: 50%; bottom: 18px; transform: translateX(-50%); width: min(430px, 92vw); background: #e7dcbc; color: #241f14; border: 1px solid #8a7c58; box-shadow: 0 10px 34px rgba(0,0,0,.55); padding: 14px 16px 12px; display: none; font-family: Georgia, serif; }
+#manCard .wclose { position: absolute; top: 6px; right: 8px; left: auto; }
+#manCard .gHead { font-family: 'Courier New', monospace; letter-spacing: 2px; font-size: 11px; border-bottom: 1px solid #8a7c58; padding-bottom: 4px; margin-bottom: 8px; }
+.cardSub { margin: 5px 0 0 0; }
+.rollList { font-size: 12.5px; line-height: 1.5; }
+</style>
+<div id="manCard"><button class="wclose" id="manClose">&#215;</button><div class="gHead">THE MAN HIMSELF</div><div id="manBody"></div></div>
 <div id="setup">
   <h1>TRENCH</h1>
   <p>a war you only watch</p>
@@ -2318,11 +2326,11 @@ function killSoldier(s, cause){
   if (s.squad >= 0) sim.soldiers.forEach(o => { if (o.squad === s.squad && !o.dead) o.grief = Math.min(1, Math.max(o.grief, 0.55)); });
   recordSeen('death', s.id, s.fx, s.fy, 9);
   logEvent('death', describeMan(s) + ' is dead (' + cause + ').');
-  { const r0 = recOf(s); r0.diedT = sim.t; r0.diedDay = Math.floor(sim.t / DAY_LEN) + 1; r0.cause = cause;
+  { const r0 = recOf(s); r0.diedT = sim.t; r0.diedDay = Math.max(1, Math.floor(sim.t / DAY_LEN) + 1); r0.cause = cause;
     const pr = { death: 3, raid: 2, wound: 1 }; let bp = -1;
     (s.seen || []).forEach(ev => { const p = pr[ev.kind] || 0; if (p > bp){ bp = p; r0.memory = seenLine(ev); } });
     if (bp < 0) r0.memory = null;
-    (sim.fallen = sim.fallen || []).push(r0); }
+    r0.squad = s.squad; (sim.fallen = sim.fallen || []).push(r0); }
 }
 function fireTracer(a, b){
   sim.parts.push({ kind:'tracer', fx0: a.fx, fy0: a.fy, z0: a.z + 1.3, fx1: b.fx ?? b[0], fy1: b.fy ?? b[1], z1: (b.z ?? 0) + 1, t: 0, life: 0.09 });
@@ -3062,7 +3070,7 @@ function drawCat(){
 function cap1(t){ return t ? t.charAt(0).toUpperCase() + t.slice(1) : t; }
 function recOf(s){   /* the service record: one desc, computed once, used on every surface forever */
   if (!s.record) s.record = { id: s.id, trade: s.trade, enemy: !!s.enemy, desc: describeMan(s),
-    cameDay: sim ? Math.floor(sim.t / DAY_LEN) + 1 : 1, cameT: sim ? sim.t : 0,
+    cameDay: sim ? Math.max(1, Math.floor(sim.t / DAY_LEN) + 1) : 1, cameT: sim ? sim.t : 0,
     wounds: 0, deathsSeen: 0, memory: null, graveIdx: undefined, overflow: false };
   return s.record; }
 function descOfId(id){ const s = sim.soldiers.find(o => o.id === id); if (s) return describeMan(s);
@@ -3096,7 +3104,9 @@ function followUpLine(id){ const r = (sim.fallen || []).find(x => x.id === id);
 function showGrave(r){ const el = document.getElementById('graveCard'); if (!el) return;
   const img = portraitURL(r);
   let t = obitText(r);
-  t += (r.graveIdx !== undefined && !r.overflow) ? ' Grave ' + (r.graveIdx + 1) + ' in the yard past the support trench.' : ' The yard is full; he lies where the ground allowed.';
+  t += (r.graveIdx !== undefined && !r.overflow) ? ' Grave ' + (r.graveIdx + 1) + ' in the yard past the support trench.'
+    : r.overflow ? ' The yard is full; he lies where the ground allowed.'
+    : ' Not yet buried; the dawn party will carry him out.';
   document.getElementById('graveBody').innerHTML = '<div class="obit">' + (img ? '<img class="obitFace" src="' + img + '" alt="">' : '') + '<p>' + t + '</p></div>';
   el.style.display = 'block';
   document.getElementById('graveClose').onclick = () => { el.style.display = 'none'; }; }
@@ -3106,15 +3116,95 @@ function graveTap(px, py){ if (!sim || sim.paperOpen) return;
   let best = -1, bd = 30;
   for (let i = 0; i < n; i++){ const gt = sim.map.graveTiles[i]; const sp = w2s(gt[0] + 0.5, gt[1] + 0.5, 0);
     const d = Math.hypot(sp[0] - px, sp[1] - py); if (d < bd){ bd = d; best = i; } }
-  if (best < 0){ if (card) card.style.display = 'none'; return; }
-  const r = (sim.fallen || []).find(x => x.graveIdx === best);
-  if (r) showGrave(r); else if (card) card.style.display = 'none'; }
+  const r = best >= 0 ? (sim.fallen || []).find(x => x.graveIdx === best) : null;
+  if (r){ const mc = document.getElementById('manCard'); if (mc) mc.style.display = 'none'; showGrave(r); return; }
+  let bestM = null, bestScore = 1e9;
+  sim.soldiers.forEach(s => { if (s.gone) return; const sp = w2s(s.fx, s.fy, s.z || 0);
+    const dx = Math.abs(sp[0] - px), up = sp[1] - py;
+    if (dx <= 20 && up >= -8 && up <= 58 * cam.zoom){ const sc = dx + Math.abs(up - 22) * 0.4; if (sc < bestScore){ bestScore = sc; bestM = s; } } });
+  if (bestM){ if (bestM.dead){ const fr = (sim.fallen || []).find(x => x.id === bestM.id);
+      if (fr){ const mc = document.getElementById('manCard'); if (mc) mc.style.display = 'none'; showGrave(fr); } }
+    else showMan(bestM); return; }
+  if (card) card.style.display = 'none';
+  const mc2 = document.getElementById('manCard'); if (mc2) mc2.style.display = 'none'; }
 let tapMark = null;
 cv.addEventListener('pointerdown', e => { tapMark = { x: e.clientX, y: e.clientY, t: performance.now(), cx: cam.x, cy: cam.y }; });
 cv.addEventListener('pointerup', e => { if (!tapMark) return; const m = tapMark; tapMark = null;
   if (performance.now() - m.t > 300 || Math.hypot(e.clientX - m.x, e.clientY - m.y) > 6) return;
   if (Math.hypot((cam.x - m.cx) * cam.zoom, (cam.y - m.cy) * cam.zoom) > 6) return;
   graveTap(e.clientX, e.clientY); });
+
+
+function nodeName(nd){ if (!nd) return 'the line';
+  if (nd === 'depot') return 'the depot'; if (nd === 'cook') return 'the cookhouse'; if (nd === 'aid') return 'the aid post';
+  if (nd === 'hq') return 'HQ'; if (nd === 'battery') return 'the battery'; if (nd === 'lorry') return 'the lorry';
+  if (nd.indexOf('sec') === 0) return (sim.map.sectors[+nd.slice(3)] || {}).id + ' sector';
+  if (nd.indexOf('crate') === 0) return 'a fallen crate'; return 'the line'; }
+function stateLineOf(s){
+  if (s.carriedBy) return 'Being carried to the aid post.';
+  if (s.state === 'down') return s.inBed ? 'In a bed at the aid post.' : 'Down, waiting for the bearers.';
+  if (s.broke) return 'Gone to ground in the dugout, getting himself back.';
+  if ((s.supp || 0) > 0.65) return 'Pinned by fire, head down and staying down.';
+  if (s.state === 'sleep') return 'Asleep, in his turn.';
+  if (s.carryCas) return 'Carrying a wounded man to the aid post.';
+  if (s.supplyJob) return 'On a supply run: ' + s.supplyJob.com + ' for ' + nodeName(s.supplyJob.to) + '.';
+  if (s.sawJob !== undefined && s.sawJob !== null) return 'On the saw at the depot, turning logs into boards.';
+  if (s.wreckJob) return 'Out with the party clearing the road.';
+  if (s.job) return 'On a working party in the line.';
+  if (s.gatherId){ const ses = (sim.social || []).find(x => x.id === s.gatherId);
+    const k = ses ? ses.kind : ''; return 'Off duty in company' + (k === 'cards' ? ', at cards.' : k === 'rum' ? ', at the rum issue.' : k === 'mail' ? ', over the mail.' : k === 'school' ? ', at a lesson.' : k === 'talk' ? ', in talk.' : '.'); }
+  if (s.talk) return 'In talk with a mate.';
+  if ((s.supp || 0) > 0.35) return 'Keeping his head down under fire.';
+  if (s.state === 'watch') return s.enemy ? 'Watching from the far parapet.' : 'On watch at the parapet.';
+  if (s.raid) return 'Over the wire, in the dark.';
+  if (s.path) return 'On the move.';
+  if (s.vig) return ({ cards: 'At cards.', read: 'Reading, in a corner of the dugout.', clean: 'Cleaning his rifle.', cook: 'At the cookhouse pots.', repair: 'Mending his gear.', bow: 'Standing at a grave in the yard.' })[s.vig.pose] || 'At a small task of his own.';
+  return s.enemy ? 'At his post on the far line.' : 'At his post.';
+}
+function squadIntent(sq){
+  const members = sim.soldiers.filter(m => m.squad === sq.id && !m.dead);
+  if (members.length < 2) return null;
+  const lead = sim.soldiers.find(m => m.id === sq.leadId && !m.dead);
+  const secName = (sim.map.sectors[sq.sector] || {}).id || '?';
+  const deadRecent = (sim.fallen || []).filter(r => r.squad === sq.id && sim.t - r.diedT < DAY_LEN);
+  const down = members.filter(m => m.state === 'down' || m.inBed).length;
+  const hot = members.filter(m => (m.supp || 0) > 0.35).length;
+  const brokeN = members.filter(m => m.broke).length;
+  const ease = members.filter(m => m.gatherId).length;
+  const asleep = members.filter(m => m.state === 'sleep').length;
+  const watch = members.filter(m => m.state === 'watch').length;
+  const half = Math.ceil(members.length / 2);
+  let text;
+  if (deadRecent.length && brokeN) text = 'They lost a man within the day, and one of them has gone to ground; the rest are holding on.';
+  else if (deadRecent.length) text = 'Thinner by ' + (deadRecent.length === 1 ? 'one' : deadRecent.length) + ' since yesterday; still at their posts.';
+  else if (hot >= half) text = 'Heads down under fire at the parapet; trading shots, going nowhere.';
+  else if (down) text = 'One of them is at the aid post; the rest cover his bay.';
+  else if (brokeN) text = 'One of them has gone to ground in the dugout; the rest carry on short-handed.';
+  else if (ease >= 2) text = 'Off duty together just now.';
+  else if (asleep >= half) text = 'Mostly asleep in the dugout, in turns; the watch is thin but kept.';
+  else if (watch >= half) text = 'On watch along the parapet; a quiet tour so far.';
+  else text = 'About the trench on the day\'s work; a quiet tour so far.';
+  return { head: lead ? cap1(describeMan(lead)) + '\'s squad' : 'A squad in ' + secName, sector: secName,
+    n: members.length, able: members.length - down, text };
+}
+function showMan(s){ const el = document.getElementById('manCard'); if (!el) return;
+  const gc = document.getElementById('graveCard'); if (gc) gc.style.display = 'none';
+  const r = recOf(s); const img = portraitURL(r);
+  let sub = 'Came on day ' + r.cameDay + '.';
+  if (r.wounds) sub += ' Carried in ' + (r.wounds === 1 ? 'once' : r.wounds + ' times') + '.';
+  if (r.deathsSeen) sub += ' Has stood over ' + (r.deathsSeen === 1 ? 'one grave' : r.deathsSeen + ' graves') + '.';
+  let rel = '';
+  if (s.bond){ let bid = null, bv = 0.24; for (const k in s.bond) if (s.bond[k] > bv){ bv = s.bond[k]; bid = +k; }
+    if (bid !== null){ const o = sim.soldiers.find(x => x.id === bid); if (o && !o.dead) rel = 'Closest to ' + descOfId(bid) + '.'; } }
+  let sql = '';
+  if (s.squad >= 0){ const sq = (sim.squads || []).find(x => x.id === s.squad); if (sq){ const it = squadIntent(sq); if (it) sql = 'His squad: ' + it.text; } }
+  const seen = (s.seen || []).slice(-4).map(ev => seenLine(ev)).filter(Boolean);
+  document.getElementById('manBody').innerHTML =
+    '<div class="obit">' + (img ? '<img class="obitFace" src="' + img + '" alt="">' : '') + '<p><b>' + cap1(r.desc) + '.</b> ' + stateLineOf(s) + '</p></div>' +
+    '<p class="cardSub">' + sub + '</p>' + (rel ? '<p class="cardSub">' + rel + '</p>' : '') + (sql ? '<p class="cardSub">' + sql + '</p>' : '') +
+    '<p class="cardSub">' + (seen.length ? seen.join(' ') : 'Nothing has happened near him yet.') + '</p>';
+  el.style.display = 'block';
+  document.getElementById('manClose').onclick = () => { el.style.display = 'none'; }; }
 
 function buildWeekly(live){
   const from = sim.lastWeeklyT || 0;
@@ -3165,6 +3255,17 @@ function buildWeekly(live){
     const heavy = sim.soldiers.find(o => !o.dead && !o.enemy && o.record && (o.record.deathsSeen || 0) >= 3);
     if (heavy && notices.length < 2) notices.push(cap1(describeMan(heavy)) + ' has stood over three graves, and keeps his post.');
     if (notices.length) h += '<h3>Notices</h3>' + notices.map(t => '<p>' + t + '</p>').join(''); }
+  { const ints = (sim.squads || []).map(sq => squadIntent(sq)).filter(Boolean).sort((a, b) => a.sector < b.sector ? -1 : 1);
+    if (ints.length){ h += '<h3>The Squads</h3>' + ints.map(it => '<p><b>' + it.head + '</b> (' + it.sector + ' sector, ' + it.able + ' of ' + it.n + ' able). ' + it.text + '</p>').join(''); } }
+  { const living = sim.soldiers.filter(s => !s.dead && !s.enemy);
+    const parts = [];
+    for (let i = 0; i < 3; i++){ const arr = living.filter(s => s.sector === i);
+      if (arr.length) parts.push(sim.map.sectors[i].id + ' sector: ' + arr.map(s => describeMan(s)).join(', ')); }
+    const rear = living.filter(s => !(s.sector >= 0 && s.sector < 3));
+    if (rear.length) parts.push('the rear: ' + rear.map(s => describeMan(s)).join(', '));
+    h += '<h3>The Roll</h3><p class="rollList">' + living.length + ' on the line. ' + parts.join('. ') + '.</p>';
+    const fl = (sim.fallen || []).filter(r => !r.enemy);
+    if (fl.length) h += '<p class="rollList">The book of the fallen (' + fl.length + '): ' + fl.map(r => r.desc + ' (day ' + r.diedDay + (r.graveIdx !== undefined && !r.overflow ? ', grave ' + (r.graveIdx + 1) : '') + ')').join(' &middot; ') + '.</p>'; }
   h += '</div><div class="foot">Set in the field. No word of this paper is official, and every word of it is true.</div>';
   return h;
 }
