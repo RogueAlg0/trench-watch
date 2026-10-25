@@ -459,7 +459,7 @@ function makeSoldier(role, postTile){
     h: rr(0.94, 1.05), scarf: rng() < 0.32 ? pick(['accent','accent2']) : 'none',
     state: 'idle', tState: rr(0, 3), stateAge: 0, speed: rr(1.06, 1.24), phase: rr(0, 6.28),
     faceA: -Math.PI / 2, vx: 0, vy: 0, duck: 0, climbing: null, onStep: false,
-    brave: rng(), warm: rng(), friend: -1, rival: -1, grief: 0, jumpy: 0, nerves: rr(0.65, 1), shakenT: 0, clean: 0, letterT: rr(4, 44),
+    brave: rng(), warm: rng(), friend: -1, rival: -1, grief: 0, jumpy: 0, nerves: rr(0.65, 1), shakenT: 0, weapon: 'back', weaponT: 0, weaponTo: 'back', bayonet: false, bayonetAt: 0, unfixAt: 0, fixAt: 0, fixWill: true, clean: 0, letterT: rr(4, 44),
     vig: null, duty: null, dead: false, arriveAct: null, shootAt: 0, fired: false, fumbled: false,
     job: null, supplyJob: null, gun: -1, gunSlot: 0, pairId: -1, sector: -1, kneel: false,
     rest: rr(0.5, 1), food: rr(0.5, 1), morale: rr(0.5, 0.9), shunned: 0, grudge: -1, assigner: -1,
@@ -567,7 +567,9 @@ function pawnShadow(spr){ if (shadowCache.has(spr)) return shadowCache.get(spr);
   if (shadowCache.size > 500) shadowCache.clear();
   shadowCache.set(spr, c); return c; }
 function pawnSprite(s, pose, F){
-  const key = [s.enemy ? 'E' : 'F', s.trade, s.scarf, s.rank, pose, F, s.variant || 0, s.squadMark || 0].join('|');
+  const key = [s.enemy ? 'E' : 'F', s.trade, s.scarf, s.rank, pose, F, s.variant || 0, s.squadMark || 0,
+    (s.bayonet && ['aim', 'boltA', 'boltB', 'fight', 'thrust'].includes(pose)) ? 'B' : '',
+    (pose === 'stand' || pose.indexOf('walk') === 0) ? (s.weapon || 'back') : ''].join('|');
   if (pawnCache.has(key)) return pawnCache.get(key);
   const spr = (pose === 'down' || pose === 'sleep') ? buildDownCanvas(s, pose === 'sleep') : pose === 'prone' ? buildProneCanvas(s) : buildPawnCanvas(s, pose, F);
   pawnCache.set(key, spr); return spr;
@@ -593,7 +595,7 @@ function buildPawnCanvas(s, pose, F){
   if (kneel || sit) P.hipY = 31;
   const shY = P.hipY - P.torsoH, headY = shY - P.headR - 1.4;
   const dir = F === 'E' ? 1 : F === 'N' ? -0.4 : 0.6;
-  const walkPh = pose === 'walkB' ? 1 : 0, walking = pose === 'walkA' || pose === 'walkB';
+  const walkPh = (pose === 'walkB' || pose === 'walkB2') ? 1 : 0, walking = pose === 'walkA' || pose === 'walkB' || pose === 'walkA2' || pose === 'walkB2';
   /* legs: thigh, puttee-wrapped shin, boot with a toe */
   const leg = (side, stride) => { const hx = cx + side * P.legsApart, fx = hx + stride;
     line(hx, P.hipY + 1, fx, 37.8, P.limbW, U, side < 0 ? 0 : 1);
@@ -604,7 +606,8 @@ function buildPawnCanvas(s, pose, F){
   else if (kneel){ blob(cx - 3.6, 36.8, 4.2, 2.4, U, 0); line(cx + 3.4, P.hipY + 1, cx + 4, 37.6, P.limbW, U, 1);
     rect(cx - 7.4, 38.6, cx - 0.6, 41, 'dark', 1); rect(cx + 2, 37.2, cx + 6.8, 40.6, 'dark', 1); }
   else { const spread = pose === 'attention' ? 2 : P.legsApart;
-    const sA = walking ? (walkPh ? 3 : -1.8) : 0, sB = walking ? (walkPh ? -1.8 : 3) : 0;
+    const STR = { walkA: [3, -1.8], walkA2: [1.1, -0.5], walkB: [-1.8, 3], walkB2: [-0.5, 1.1] };
+    const sA = walking ? STR[pose][0] : 0, sB = walking ? STR[pose][1] : 0;
     P.legsApart = spread; leg(-1, sA); leg(1, sB); P.legsApart = 3.3; }
   /* pack with a bedroll on top, worn by most */
   const noPack = ['cook', 'officer', 'bearer', 'medic'].includes(s.trade);
@@ -636,7 +639,8 @@ function buildPawnCanvas(s, pose, F){
   const rifleHeld = (lean) => { const b = walking && walkPh ? 0.8 : 0;
     line(cx + 3.4, shY + 1 + b, cx + 9.8, shY - 0.6 - lean + b, 2, 'timber', 1);
     line(cx + 8.4, shY - 0.5 - lean + b, cx + 14.4, shY - 1.4 - lean * 1.6 + b, 1.25, 'dark', 1);
-    set(cx + 8.8, shY - 2 - lean + b, 'steel', 2); };                                       // the bolt knob
+    set(cx + 8.8, shY - 2 - lean + b, 'steel', 2);
+    if (s.bayonet){ line(cx + 14.4, shY - 1.4 - lean * 1.6 + b, cx + 18.8, shY - 2 - lean * 1.9 + b, 0.95, 'steel', 2); set(cx + 17.6, shY - 2.7 - lean * 1.9 + b, 'pale', 2); } };  // the blade, past the muzzle
   const slung = () => { if (!rifleTrade) return; const b = walking && walkPh ? 0.9 : 0;
     if (F === 'N'){ line(cx - 5.4, P.hipY - 1 + b, cx + 6.2, shY - 0.6 + b, 1.9, 'timber', 1);
       line(cx + 5, shY - 0.4 + b, cx + 8.8, shY - 5.4 + b, 1.1, 'dark', 1);
@@ -646,7 +650,7 @@ function buildPawnCanvas(s, pose, F){
       line(cx + 0.4, shY + 7.4 + b, cx + 7, shY - 3.6 + b, 0.8, 'dark', 0); } };
   if (pose === 'aim'){ armR(cx + 6 + dir * 4.6, shY + 0.8); armL(cx + 4 + dir * 4, shY + 3.2, 1);
     if (F === 'E') rifleHeld(0.4); else if (F === 'N'){ line(cx - 2.4, shY - 0.8, cx - 10.6, shY - 6.2, 2, 'timber', 1);
-      line(cx - 9.2, shY - 5.4, cx - 14.6, shY - 8.6, 1.25, 'dark', 1); set(cx - 8.4, shY - 7.2, 'steel', 2); }
+      line(cx - 9.2, shY - 5.4, cx - 14.6, shY - 8.6, 1.25, 'dark', 1); set(cx - 8.4, shY - 7.2, 'steel', 2); if (s.bayonet) line(cx - 14.6, shY - 8.6, cx - 18.8, shY - 10.6, 0.95, 'steel', 2); }
     else rifleHeld(2.2); }
   else if (pose === 'carry'){ armL(cx - 6.6, P.hipY - 2.4, 1); armR(cx + 7, P.hipY - 3.4);
     if (F === 'E') rect(cx + 4.2, P.hipY - 9.6, cx + 12.6, P.hipY - 0.6, 'timber', 1);
@@ -660,7 +664,7 @@ function buildPawnCanvas(s, pose, F){
   else if (pose === 'crank'){ armL(cx - 6, P.hipY - 3.4); armR(cx + 6.6, P.hipY - 7.6);
     rect(cx + 7, P.hipY - 5.2, cx + 11, P.hipY - 0.4, 'dark', 1); set(cx + 8.8, P.hipY - 6.6, 'steel', 1); }
   else if (pose === 'repair'){ armL(cx - 6, P.hipY - 2.8); armR(cx + 7.2, P.hipY - 6.6); rect(cx + 6, P.hipY - 10.2, cx + 9, P.hipY - 6.8, 'steel', 1); }
-  else if (pose === 'fight'){ armL(cx + dir * 7 - 2.4, shY + 1.6, 1); armR(cx + dir * 8.4, shY - 0.8); }
+  else if (pose === 'fight'){ armL(cx + dir * 7 - 2.4, shY + 1.6, 1); armR(cx + dir * 8.4, shY - 0.8); if (s.weapon === 'hand' && rifleTrade) rifleHeld(0.8); }
   else if (pose === 'attention'){ armL(cx - P.torsoW / 2 - 1, P.hipY + 3); armR(cx + P.torsoW / 2 + 1, P.hipY + 3); }
   else if (pose === 'point'){ armR(cx + dir * 10.6, shY - 0.8); armL(cx - P.torsoW / 2 - 1.6, P.hipY + 1.8); }
   else if (pose === 'observe'){ armL(cx - 3, headY + 1.6); armR(cx + 3.8, headY + 1.6);
@@ -681,8 +685,23 @@ function buildPawnCanvas(s, pose, F){
     if (s.vigPose === 'cards' || s.vigPose === 'read'){ rect(cx - 4.8, P.hipY - 11.4, cx + 5.4, P.hipY - 4.6, 'pale', 1);
       set(cx - 2, P.hipY - 8, 'dark', 1); set(cx + 2, P.hipY - 9.4, 'dark', 1); } }
   else if (pose === 'bow'){ armL(cx - 4.8, P.hipY + 2.4); armR(cx + 4.8, P.hipY + 2.4); }
+  else if (pose === 'thrust'){ armL(cx + 5 + dir * 5, shY + 2.6, 1); armR(cx + 2 + dir * 5, shY + 0.6);
+    line(cx + 1, shY + 1.4, cx + 15, shY - 0.6, 2, 'timber', 1); line(cx + 13.4, shY - 0.4, cx + 19.6, shY - 1.2, 1.25, 'dark', 1);
+    if (s.bayonet){ line(cx + 19.6, shY - 1.2, cx + 24.6, shY - 1.8, 0.95, 'steel', 2); set(cx + 23.4, shY - 2.6, 'pale', 2); } }
+  else if (pose === 'fixBay'){ armL(cx + 4.6, shY + 4.6, 1); armR(cx + 5.4, shY + 1.8);
+    line(cx + 5, P.hipY - 1, cx + 5.6, shY - 6.4, 2, 'timber', 1); line(cx + 5.5, shY - 5.2, cx + 5.9, shY - 9.8, 1.2, 'dark', 1);
+    if (!s.bayonet){ rect(cx - 6.4, shY + 1.4, cx - 5.2, shY + 6.4, 'steel', 2); set(cx - 5.8, shY + 0.6, 'steel', 2); }
+    else line(cx + 5.9, shY - 9.8, cx + 6.2, shY - 13.6, 0.95, 'steel', 2); }
+  else if (pose === 'draw'){ armR(cx + 1.4, shY - 3.4); armL(cx + 3.4, shY + 3.4, 1);
+    line(cx - 5.4, P.hipY - 0.6, cx + 8.6, shY - 2.2, 1.9, 'timber', 1); line(cx + 7.2, shY - 1.8, cx + 11.8, shY - 4.6, 1.1, 'dark', 1); }
+  else if (pose === 'sling'){ armR(cx + 5.6, shY - 4.2); armL(cx - P.torsoW / 2 - 1.4, P.hipY + 1);
+    line(cx + 0.4, P.hipY - 3, cx + 8.8, shY - 5.8, 1.9, 'timber', 1); line(cx + 7.4, shY - 5, cx + 11.2, shY - 8.6, 1.1, 'dark', 1); }
   else { const sw = walking ? (walkPh ? 2.8 : -2.4) : 0;
-    armL(cx - P.torsoW / 2 - 1.8, P.hipY + 1.6 - sw); armR(cx + P.torsoW / 2 + 1.8, P.hipY + 1.6 + sw); slung(); }
+    armL(cx - P.torsoW / 2 - 1.8, P.hipY + 1.6 - sw); armR(cx + P.torsoW / 2 + 1.8, P.hipY + 1.6 + sw);
+    if (s.weapon === 'hand' && rifleTrade){ line(cx + 7.4, P.hipY + 2.4, cx + 8.6, shY - 4.4, 1.8, 'timber', 1);
+      line(cx + 8.4, shY - 3.4, cx + 9.2, shY - 7.8, 1.1, 'dark', 1);
+      if (s.bayonet) line(cx + 9.2, shY - 7.8, cx + 9.7, shY - 11.4, 0.9, 'steel', 2); }
+    else slung(); }
   /* kits */
   if (s.trade === 'cook' && F === 'S'){ rect(cx - 3.8, shY + 3.4, cx + 3.4, P.hipY + 1, 'pale', 1);
     line(cx - 3.8, shY + 3.4, cx, shY + 0.8, 0.9, 'pale', 0); rect(cx - 1, P.hipY - 3.4, cx + 2, P.hipY - 1, 'pale', 0); }
@@ -792,14 +811,15 @@ function pawnPoseOf(s){
   if (s.state === 'sleep') return 'sleep';
   if (s.climbing) return 'walkB';
   if (s.stance === 'prone' && !s.path && s.state !== 'down' && s.state !== 'sleep') return 'prone';
+  if (s.weaponT > 0 && s.state !== 'down' && s.state !== 'sleep') return s.weaponTo === 'hand' ? 'draw' : 'sling';
   const pose = s.vig ? s.vig.pose : s.state;
   s.vigPose = s.vig ? s.vig.pose : null;
   if (pose === 'watch' || pose === 'shoot') return 'aim';
   if (pose === 'cards' || pose === 'read') return 'sit';
   if (pose === 'grapple' || pose === 'scuffle' || pose === 'fight') return 'fight';
-  if (['carry', 'carryShell', 'ram', 'lay', 'cook', 'crank', 'repair', 'attention', 'point', 'observe', 'drag', 'bow', 'grieve', 'boltA', 'boltB', 'reload', 'clean', 'barrel'].includes(pose))
+  if (['carry', 'carryShell', 'ram', 'lay', 'cook', 'crank', 'repair', 'attention', 'point', 'observe', 'drag', 'bow', 'grieve', 'boltA', 'boltB', 'reload', 'clean', 'barrel', 'fixBay', 'thrust'].includes(pose))
     return pose === 'grieve' ? 'bow' : pose;
-  if (s.path) return Math.sin(s.phase) > 0 ? 'walkA' : 'walkB';
+  if (s.path){ const q = Math.floor((((s.phase % 6.2832) + 6.2832) % 6.2832) / 1.5708); return ['walkA', 'walkA2', 'walkB', 'walkB2'][q]; }
   return 'stand';
 }
 function drawMan(s){
@@ -851,11 +871,11 @@ function drawMan(s){
   const lean = (F === 'E' ? clamp(spd * 0.045, 0, 0.05) : 0) + (s.path ? Math.sin(s.phase - 0.7) * 0.011 : 0);
   const h = s.h || 1;
   const kick = (pose === 'aim' || pose === 'boltA' || pose === 'boltB') ? (s.kickT || 0) : 0;
-  const lg = pose === 'fight' ? (s.lungeT || 0) : 0;
+  const lg = (pose === 'fight' || pose === 'thrust') ? (s.lungeT || 0) : 0;
   const flinch = (s.flinchT || 0) * 0.8;
   const kx = -Math.cos(s.faceA) * (kick * 3.6 + flinch * 1.6), ky = -Math.sin(s.faceA) * (kick * 1.5 + flinch * 0.7) - kick * 1.2;
   ctx.save(); ctx.translate(sx + kx + Math.cos(s.faceA) * lg * 3.4, sy + 2 + bobY + ky + Math.sin(s.faceA) * lg * 1.7);
-  ctx.rotate(lean * (flip ? -1 : 1) - kick * 0.055 * (flip ? -1 : 1) + lg * 0.05 + (1 - (s.stanceK === undefined ? 1 : s.stanceK)) * (s.stance === 'crouch' || s.stance === 'kneel' ? 0.1 : 0));
+  ctx.rotate(lean * (flip ? -1 : 1) - kick * 0.055 * (flip ? -1 : 1) + lg * 0.05 + (1 - (s.stanceK === undefined ? 1 : s.stanceK)) * (s.stance === 'crouch' || s.stance === 'kneel' ? 0.1 : 0) + (pose === 'aim' ? Math.sin(perfT * 1.4 + s.id * 2.7) * 0.01 : 0) + (pose === 'stand' && !s.path ? Math.sin(perfT * 0.9 + s.id * 1.3) * 0.006 : 0));
   if (flip) ctx.scale(-1, 1);
   ctx.scale(h * (1 + (1 - squash) * 0.6), h * squash * (s.stanceK === undefined ? 1 : s.stanceK));
   ctx.imageSmoothingEnabled = false;
@@ -1632,6 +1652,7 @@ function updateEvents(dt){
     recordSeen('raid', 0, cx, 14, 26);
     logEvent('raid', 'A raid comes over the wire in the dark.');
     [-6, 0, 6].forEach(off2 => sim.parts.push({ kind: 'ring', fx: clamp(cx + off2, 6, 86), fy: trenchY(clamp(cx + off2, 6, 86)), z: -1, ox: 0, oy: 0, h: 20, vx: 0, vy: 0, vh: 0, life: 1.3, t: 0, col: '#e8dcc0', r: 3 }));
+    sim.soldiers.forEach(s => { if (!s.dead && !s.enemy && ['rifle', 'sent'].includes(s.trade) && !s.bayonet && !s.fixAt){ s.fixAt = sim.t + rr(1, 5); s.fixWill = true; } });
     WarAudio.shout(cx, 14); }
   if (sim.raid.active){ sim.raid.t += dt;
     const alive = sim.soldiers.filter(s => s.enemy && s.raid && !s.dead);
@@ -1831,6 +1852,18 @@ function updateSoldier(s, dt){
     const secN = sim.map.sectors[clamp(s.sector, 0, 2)] || sim.map.sectors[1];
     goTo(s, secN.dug[0] + 1, 23, { act: 'bow' });
     recordSeen('shaken', s.id, s.fx, s.fy, 7); }
+  /* the rifle lives in his hands or on his back, and moving it between them takes time */
+  if (['rifle', 'sent', 'sapper'].includes(s.trade) || s.enemy){
+    if (s.weaponT > 0){ s.weaponT -= dt; if (s.weaponT <= 0) s.weapon = s.weaponTo; }
+    else { const busyHands = s.job || s.supplyJob || s.carryCas || (s.vig && ['cards', 'read', 'cook', 'repair', 'drag', 'carry', 'carryShell', 'barrel'].includes(s.vig.pose));
+      const want = (s.foe || s.state === 'watch' || sim.raid.active || s.patrol) ? 'hand' : (busyHands || s.state === 'sleep' ? 'back' : s.weapon);
+      if (want !== s.weapon){ s.weaponTo = want; s.weaponT = want === 'hand' ? rr(0.55, 0.8) : rr(0.8, 1.1); } }
+    if (s.fixAt && sim.t >= s.fixAt){ const will = s.fixWill; s.fixAt = 0;
+      if (!s.foe && s.state !== 'down' && s.state !== 'sleep'){ s.vig = { pose: 'fixBay', t: rr(1.6, 2.6) };
+        if (will) s.bayonetAt = sim.t + rr(1.6, 2.6); else s.unfixAt = sim.t + rr(1.6, 2.6); } }
+    if (s.bayonetAt && sim.t >= s.bayonetAt){ s.bayonetAt = 0; s.bayonet = true;
+      sim.parts.push({ kind: 'spark', fx: s.fx, fy: s.fy, z: s.z + 1.4, ox: 4, oy: -4, h: 30, vx: 0, vy: 0, vh: -6, life: 0.3, t: 0, col: '#e8ecf2' }); }
+    if (s.unfixAt && sim.t >= s.unfixAt){ s.unfixAt = 0; s.bayonet = false; } }
   s.grief = Math.max(0, s.grief - dt * 0.0022); s.jumpy = Math.max(0, s.jumpy - dt);
   s.shunned = Math.max(0, (s.shunned || 0) - dt); s.letterT = (s.letterT || 0) + dt;
   if (!s.dead && !s.enemy && s.state !== 'down'){
@@ -1886,12 +1919,14 @@ function updateSoldier(s, dt){
           atk.vig = { pose: 'fight', t: 0.6 };
           if (rng() < 0.3) wound(def, 'close fighting');
           s.foeT = rr(1.2, 2.2); }
-        else { /* lunge and strike */
+        else { /* lunge and strike: with steel fixed and the rifle up, it is a thrust, and men come apart after it */
+          const bay = atk.bayonet && atk.weapon === 'hand' && !(atk.grapDown > 0);
           if (!(atk.grapDown > 0)){ tryStep(atk, atk.fx + au * Math.min(0.32, Math.max(0, ad - 0.38)), atk.fy + av * Math.min(0.32, Math.max(0, ad - 0.38)));
-            atk.lungeT = 1; atk.vig = { pose: 'fight', t: 0.55 }; }
+            atk.lungeT = 1; atk.vig = { pose: bay ? 'thrust' : 'fight', t: 0.55 }; }
           if (!(def.grapDown > 0)){ tryStep(def, def.fx + au * 0.2, def.fy + av * 0.2); def.duck = Math.max(def.duck, 0.55); }
           if (rng() < 0.16) burst(def.fx, def.fy, def.z + 2.2, 2);
-          if (rng() < 0.55) wound(def, 'close fighting');
+          if (rng() < (bay ? 0.72 : 0.55)) wound(def, 'close fighting');
+          if (bay && rng() < 0.45){ s.foe = null; f.foe = null; tryStep(def, def.fx + au * 0.5, def.fy + av * 0.5); }
           s.foeT = rr(1.1, 2.4); } } }
     return; }
   /* knocked flat by a near burst: slide, tumble, get up slow */
@@ -2026,7 +2061,10 @@ function updateSoldier(s, dt){
           const gx = Math.floor(s.fx);
           const tgt = foe ? foe : (s.enemy ? { fx: rr(6, 86), fy: trenchY(ri(6, 86)) + 0.4, z: -0.5 }
                                         : { fx: rr(6, 86), fy: enemyY(ri(6, 86)) + 0.5, z: -1 });
-          if (foe || s.enemy || rng() < (sim.intensity > 0.5 ? 0.3 : 0.12)){ fireTracer(s, tgt); s.kickT = 1; WarAudio.rifle(s.fx, s.fy); }
+          if (foe || s.enemy || rng() < (sim.intensity > 0.5 ? 0.3 : 0.12)){
+          if (s.weapon !== 'hand' && (['rifle', 'sent', 'sapper'].includes(s.trade) || s.enemy)){
+            if (!(s.weaponT > 0)){ s.weaponTo = 'hand'; s.weaponT = rr(0.55, 0.8); } cyc.stage = 'aim'; cyc.t = 0.7; }
+          else { fireTracer(s, tgt); s.kickT = 1; WarAudio.rifle(s.fx, s.fy); } }
           if (foe && rng() < 0.3) wound(foe, 'rifle fire');
           s.rifle.foul = Math.min(1, s.rifle.foul + 0.06);
           s.shots = (s.shots || 0) + 1;
@@ -2298,6 +2336,9 @@ function updateSystems(dt){
     sim.soldiers.forEach(s => { if (s.dead || s.enemy) return;
       s.alertT = sim.t + ((s.trade === 'sergeant' || s.trade === 'officer') ? rr(0, 2) : (s.sector === lateSec ? rr(40, 85) : rr(1, 9))); });
     if (lateSec >= 0) logEvent('order', sim.map.sectors[lateSec].id + ' sector is late to stand-to. The shout never reached the far dugouts.');
+    sim.soldiers.forEach(s => { if (s.dead || !['rifle', 'sent'].includes(s.trade)) return;
+      if (sim.hour > 12 && !s.bayonet){ s.fixAt = (s.alertT || sim.t) + rr(1, 7); s.fixWill = true; }
+      if (sim.hour < 12 && s.bayonet){ s.fixAt = (s.alertT || sim.t) + rr(2, 9); s.fixWill = false; } });
     const offS = sim.soldiers.find(s => s.trade === 'officer' && !s.dead);
     if (offS) WarAudio.shout(offS.fx, offS.fy); }
   if (!stNow) sim.standToWas = false;
@@ -2701,6 +2742,31 @@ function paintGroundLayers(rect){
     const tt = (gx2 >= 0 && gy2 >= 0 && gx2 < MW && gy2 < MH) ? sim.grid[gy2][gx2] : null;
     if (!tt || tt.type !== 'ground') continue;
     ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx - 1.6, by - 3.4); ctx.moveTo(bx + 1.4, by); ctx.lineTo(bx + 2.4, by - 2.8); ctx.stroke(); }
+  /* tuft clusters: the field grows back through the war, a few blades at a time */
+  for (let i = 0; i < 300; i++){ const bx = (R() - 0.05) * 4800, by = R() * 2450 - 40;
+    if (!inR(bx, by, 12)) continue;
+    const gx2 = Math.floor((bx / 32 + by / 16) / 2), gy2 = Math.floor((by / 16 - bx / 32) / 2);
+    const tt = (gx2 >= 0 && gy2 >= 0 && gx2 < MW && gy2 < MH) ? sim.grid[gy2][gx2] : null;
+    if (!tt || tt.type !== 'ground') continue;
+    const blades = 3 + Math.floor(R() * 4);
+    for (let b = 0; b < blades; b++){ const ox = (R() - 0.5) * 7, tall = 2.6 + R() * 3.4;
+      ctx.strokeStyle = R() < 0.6 ? 'rgba(107,98,66,.55)' : 'rgba(84,90,58,.5)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(bx + ox, by); ctx.lineTo(bx + ox + (R() - 0.5) * 2.4, by - tall); ctx.stroke(); } }
+  /* litter: shell brass, splinters, torn things, the small trash of a held line */
+  for (let i = 0; i < 1000; i++){ const bx = (R() - 0.05) * 4800, by = R() * 2450 - 40;
+    if (!inR(bx, by, 6)) continue;
+    const r = R();
+    ctx.fillStyle = r < 0.45 ? 'rgba(30,24,16,.35)' : r < 0.8 ? 'rgba(210,190,150,.16)' : 'rgba(120,110,80,.3)';
+    ctx.fillRect(bx, by, 1 + R() * 2.2, 1 + R() * 1.4); }
+  for (let i = 0; i < 150; i++){ const bx = (R() - 0.05) * 4800, by = R() * 2450 - 40;
+    if (!inR(bx, by, 8)) continue;
+    ctx.fillStyle = R() < 0.5 ? 'rgba(74,60,38,.5)' : 'rgba(52,50,48,.5)';
+    ctx.fillRect(bx, by, 2.6 + R() * 3.4, 1.2 + R() * 1.2); }
+  /* the comm trenches are walked a hundred times a day: darken the way */
+  ctx.fillStyle = 'rgba(26,20,12,.10)';
+  [18, 46, 74].forEach(cgx => { for (let gy = 21; gy <= 50; gy++){ const px = isoX(cgx + 0.5, gy + 0.5), py = isoY(cgx + 0.5, gy + 0.5, 0);
+    if (!inR(px, py, 60)) continue;
+    ctx.beginPath(); ctx.ellipse(px, py, 26, 8, 0, 0, 6.29); ctx.fill(); } });
 }
 function paintRoadBand(){
   ctx.fillStyle = 'rgba(38,30,20,.5)'; ctx.beginPath();
@@ -2893,6 +2959,19 @@ function draw(){
     ctx.fillStyle = pool; ctx.beginPath(); ctx.ellipse(ex, ey, w1 * 1.15, w1 * 0.5, 0, 0, 6.29); ctx.fill();
     ctx.fillStyle = 'rgba(255,246,205,.95)'; ctx.beginPath(); ctx.arc(hx, headY, 2.6 * cam.zoom, 0, 6.29); ctx.fill();
     ctx.restore(); });
+  if (simLight > 0.45){ ctx.save(); ctx.globalCompositeOperation = 'multiply';   /* cloud shadows crawl the field */
+    for (let i = 0; i < 3; i++){ const cxp = ((perfT * (4 + i * 1.7) + i * 620) % (VW + 900)) - 450, cyp = VH * (0.2 + i * 0.27) + Math.sin(perfT * 0.05 + i * 2) * 26;
+      const cg = ctx.createRadialGradient(cxp, cyp, 10, cxp, cyp, 300 + i * 90);
+      cg.addColorStop(0, 'rgba(70,72,66,' + (0.16 * simLight) + ')'); cg.addColorStop(1, 'rgba(70,72,66,0)');
+      ctx.fillStyle = cg; ctx.fillRect(cxp - 420, cyp - 300, 840, 600); }
+    ctx.restore(); }
+  const fogA = (sim.hour > 4.4 && sim.hour < 8.6) ? 0.13 * Math.min(1, 0.35 + sim.water / 9) : 0;   /* morning fog off wet ground */
+  if (fogA > 0.01){ ctx.save();
+    for (let i = 0; i < 5; i++){ const fy2 = VH * (0.34 + i * 0.13), fx2 = ((perfT * (6 + i * 2.3) + i * 480) % (VW + 700)) - 350;
+      const fg = ctx.createRadialGradient(fx2, fy2, 8, fx2, fy2, 340);
+      fg.addColorStop(0, 'rgba(214,218,210,' + fogA + ')'); fg.addColorStop(1, 'rgba(214,218,210,0)');
+      ctx.fillStyle = fg; ctx.beginPath(); ctx.ellipse(fx2, fy2, 340, 44 + i * 7, 0, 0, 6.29); ctx.fill(); }
+    ctx.restore(); }
   ctx.fillStyle = `rgba(28,44,74,${0.04 + (1 - simLight) * 0.06})`; ctx.fillRect(0, 0, VW, VH);
   if (sim.t < 8){ ctx.globalAlpha = Math.min(1, sim.t / 1.4, (8 - sim.t) / 3);
     ctx.fillStyle = PAL.moon; ctx.font = '26px Georgia'; ctx.textAlign = 'center';
