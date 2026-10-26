@@ -3361,30 +3361,49 @@ function updateSoldier(s, dt){
         tryStep(s, s.fx + (-uy) * cir, s.fy + ux * cir);
         s.phase += dt * 3.2;
         if (!s.vig) s.vig = { pose: 'fight', t: rr(0.3, 0.55) }; }
-      if (s.foeT <= 0){ const atk = rng() < 0.5 ? s : f, def = atk === s ? f : s;
+      if (s.foeT <= 0){ sim.grapStats = sim.grapStats || { ex: 0, wF: 0, wE: 0 };
+        if (s.foeStrike){ const st = s.foeStrike; s.foeStrike = null;
+          const atk = sim.soldiers.find(o => o.id === st.atk) || s, def = atk === s ? f : s;
+          sim.grapStats.ex++;
+          if (!atk.dead && !def.dead && atk.state !== 'down' && def.state !== 'down' && !(atk.grapDown > 0)){
+            const ax = def.fx - atk.fx, ay = def.fy - atk.fy, ad = Math.hypot(ax, ay) || 0.001, au = ax / ad, av = ay / ad;
+            tryStep(atk, atk.fx + au * Math.min(0.32, Math.max(0, ad - 0.38)), atk.fy + av * Math.min(0.32, Math.max(0, ad - 0.38)));
+            atk.lungeT = 1; atk.vig = { pose: st.bay ? 'thrust' : 'fight', t: 0.55 };
+            if (!(def.grapDown > 0)){ tryStep(def, def.fx + au * 0.22, def.fy + av * 0.22); def.duck = Math.max(def.duck, 0.6); def.flinchT = 1; }
+            if (rng() < 0.16) burst(def.fx, def.fy, def.z + 2.2, 2);
+            if (rng() < (st.bay ? 0.24 : 0.17)){ if (def.enemy) sim.grapStats.wE++; else sim.grapStats.wF++; wound(def, 'close fighting'); }
+            if (st.bay && rng() < 0.35){ s.foe = null; f.foe = null; tryStep(def, def.fx + au * 0.5, def.fy + av * 0.5); } }
+          s.foeT = rr(1.0, 2.0); }
+        else { const atk = rng() < 0.5 ? s : f, def = atk === s ? f : s;
         const ax = def.fx - atk.fx, ay = def.fy - atk.fy, ad = Math.hypot(ax, ay) || 0.001, au = ax / ad, av = ay / ad;
         const roll = rng();
-        if (roll < 0.15){ /* shove apart, both stagger, then close again */
+        if (roll < 0.24){ /* shove apart, both stagger, then close again */
+          sim.grapStats.ex++;
           tryStep(atk, atk.fx - au * 0.3, atk.fy - av * 0.3);
           tryStep(def, def.fx + au * 0.45, def.fy + av * 0.45);
-          def.duck = Math.max(def.duck, 0.8); atk.vig = { pose: 'fight', t: 0.5 }; if (!(def.grapDown > 0)) def.vig = { pose: 'fight', t: 0.6 };
-          if (rng() < 0.35) wound(def, 'close fighting');
-          s.foeT = rr(0.9, 1.8); }
-        else if (roll < 0.26 && !(def.grapDown > 0)){ /* one man goes down and scrambles */
+          def.duck = Math.max(def.duck, 0.8); def.flinchT = 1; atk.vig = { pose: 'fight', t: 0.5 }; if (!(def.grapDown > 0)) def.vig = { pose: 'fight', t: 0.6 };
+          if (rng() < 0.06){ if (def.enemy) sim.grapStats.wE++; else sim.grapStats.wF++; wound(def, 'close fighting'); }
+          s.foeT = rr(0.8, 1.6); }
+        else if (roll < 0.42){ /* steel meets steel: the strike is knocked aside in a spray of sparks */
+          sim.grapStats.ex++;
+          if (!(atk.grapDown > 0)){ atk.lungeT = 0.7; atk.vig = { pose: 'fight', t: 0.4 }; }
+          if (!(def.grapDown > 0)){ def.flinchT = 1; def.duck = Math.max(def.duck, 0.7); def.vig = { pose: 'fight', t: 0.5 }; tryStep(def, def.fx + au * 0.12, def.fy + av * 0.12); }
+          const gx = (atk.fx + def.fx) / 2, gy = (atk.fy + def.fy) / 2;
+          for (let i = 0; i < 3; i++) if (canSpawn()) sim.parts.push({ kind:'spark', fx: gx, fy: gy, z: def.z + 1.1, ox: rr(-2, 2), oy: 0, h: rr(2, 5), vx: rr(-9, 9), vy: rr(-3, 3), vh: rr(10, 26), life: rr(.18, .3), t: 0, col: '#e8e4da', r: rr(0.6, 1.1) });
+          if (rng() < 0.04){ if (def.enemy) sim.grapStats.wE++; else sim.grapStats.wF++; wound(def, 'close fighting'); }
+          s.foeT = rr(1.4, 2.2); }
+        else if (roll < 0.54 && !(def.grapDown > 0)){ /* one man goes down and scrambles */
+          sim.grapStats.ex++;
           def.grapDown = rr(1.0, 1.7); def.vig = null;
           startRag(def, au * rr(0.4, 0.7), av * rr(0.4, 0.7), rr(-4, 4));
           atk.vig = { pose: 'fight', t: 0.6 };
-          if (rng() < 0.3) wound(def, 'close fighting');
-          s.foeT = rr(1.2, 2.2); }
-        else { /* lunge and strike: with steel fixed and the rifle up, it is a thrust, and men come apart after it */
+          if (rng() < 0.10){ if (def.enemy) sim.grapStats.wE++; else sim.grapStats.wF++; wound(def, 'close fighting'); }
+          s.foeT = rr(1.2, 2.0); }
+        else { /* the wind-up: a visible beat of intent before the strike lands */
           const bay = atk.bayonet && atk.weapon === 'hand' && !(atk.grapDown > 0);
-          if (!(atk.grapDown > 0)){ tryStep(atk, atk.fx + au * Math.min(0.32, Math.max(0, ad - 0.38)), atk.fy + av * Math.min(0.32, Math.max(0, ad - 0.38)));
-            atk.lungeT = 1; atk.vig = { pose: bay ? 'thrust' : 'fight', t: 0.55 }; }
-          if (!(def.grapDown > 0)){ tryStep(def, def.fx + au * 0.2, def.fy + av * 0.2); def.duck = Math.max(def.duck, 0.55); }
-          if (rng() < 0.16) burst(def.fx, def.fy, def.z + 2.2, 2);
-          if (rng() < (bay ? 0.72 : 0.55)) wound(def, 'close fighting');
-          if (bay && rng() < 0.45){ s.foe = null; f.foe = null; tryStep(def, def.fx + au * 0.5, def.fy + av * 0.5); }
-          s.foeT = rr(1.1, 2.4); } } }
+          s.foeStrike = { atk: atk.id, bay };
+          if (!(atk.grapDown > 0)){ atk.vig = { pose: 'fight', t: 0.34 }; tryStep(atk, atk.fx - au * 0.08, atk.fy - av * 0.08); }
+          s.foeT = 0.34; } } } }
     return; }
   /* knocked flat by a near burst: slide, tumble, get up slow */
   if (s.knock){ const k = s.knock; k.t += dt;
