@@ -1736,19 +1736,31 @@ function gunSprite(kind, enemy){
     T.line(lerp(bx, mx, 0.82), lerp(14, 2.4, 0.82), mx, 2.4, 5.8, 'dark', 0);                // muzzle brake
     T.blob(bx - (enemy ? -2.4 : 2.4), 15.6, 2.6, 3, 'dark', 1); T.set(bx, 12.4, 'brass', 2); // breech + sight
   });
-  else if (kind === 'lorry') spr = pxArt(58, 28, 819, T => {
-    T.rect(2, 11, 33, 22, 'alloy', 0); T.rect(2, 11, 33, 13.4, 'alloy', 1);
-    T.rect(5, 4.4, 15, 11, 'timber', 1); T.rect(17, 5.4, 27, 11, 'timber', 0);               // the load
-    T.line(5, 4.4, 15, 11, 1, 'timber', 0); T.line(17, 5.4, 27, 11, 1, 'timber', 2);
-    T.blob(30, 9, 5.4, 3.4, 'wax', 0);                                                      // canvas over the back
-    T.rect(36, 6, 55, 23, 'alloy', 1); T.rect(36, 6, 55, 8.4, 'alloy', 2);
-    T.rect(40, 9.4, 48, 15.4, 'dark', 1); T.set(42, 10.6, 'paper', 1);                      // cab window, one glint
-    T.rect(51, 15, 54, 19, 'dark', 0); T.rect(44, 1.4, 46.4, 6, 'dark', 0);                 // stack
-    T.set(52.4, 17, 'glow', 1);                                                             // lamp
+  else if (kind === 'lorry') spr = pxArt(124, 50, 819, T => {
+    T.rect(4, 40, 120, 44, 'dark', 0);                                                        // chassis shadow line
+    T.rect(4, 16, 78, 40, 'alloy', 0);                                                        // the bed: deep alloy
+    T.blob(40, 27, 35, 10.5, 'alloy', 1);                                                     // painted light across the flank
+    T.line(4, 16, 78, 16, 1.6, 'alloy', 2);                                                   // rim highlight
+    [22, 40, 58].forEach(sx2 => T.line(sx2, 17.5, sx2, 38.5, 1, 'alloy', 0));                 // panel seams
+    for (let rx2 = 10; rx2 < 76; rx2 += 9){ T.set(rx2, 20, 'steel', 2); T.set(rx2, 35, 'steel', 2); }   // rivets
+    T.rect(8, 6, 30, 16, 'timber', 2); T.rect(32, 8, 52, 16, 'timber', 1);                    // the load: crates
+    T.line(8, 6, 30, 16, 1, 'timber', 0); T.line(32, 8, 52, 16, 1, 'timber', 2);
+    T.blob(65, 9, 14.5, 7, 'wax', 0); T.blob(65, 11.4, 15.5, 5, 'wax', 1);                     // canvas tilt over the back
+    T.rect(80, 10, 116, 40, 'alloy', 0); T.blob(117, 25, 6.6, 12.5, 'alloy', 1);              // cab + rounded nose
+    T.line(80, 10.6, 116, 10.6, 1.6, 'alloy', 2);                                             // roof highlight
+    T.rect(86, 14, 102, 26, 'dark', 1); T.set(90, 17, 'paper', 2); T.set(91, 17, 'paper', 1); // window, one glint
+    T.line(105, 12, 105, 39, 1, 'alloy', 0); T.set(108, 27, 'steel', 2);                      // door seam + handle
+    T.rect(111, 0, 114.6, 10, 'dark', 0);                                                     // stack
+    T.blob(121, 33, 2.3, 2.3, 'glow', 2);                                                     // lamp
+    for (let gy = 20; gy <= 30; gy += 3) T.set(120, gy, 'dark', 1);                           // grille
+    T.blob(26, 41, 13.5, 5, 'dark', 0); T.blob(100, 41, 13.5, 5, 'dark', 0);                  // wheel arches
+    for (let i = 0; i < 46; i++){ const mx = 5 + T.R() * 114, my = 42.6 + T.R() * 3.6; T.set(mx, my, T.R() < 0.4 ? 'rust' : 'dark', 0); }   // mud at the skirts
   });
-  else if (kind === 'wheel') spr = pxArt(13, 13, 821, T => {
-    T.blob(6.4, 6.4, 6, 6, 'dark', 0); T.blob(6.4, 6.4, 3.6, 3.6, 'alloy', 0);
-    T.line(6.4, 3, 6.4, 9.8, 1.1, 'steel', 1); T.line(3, 6.4, 9.8, 6.4, 1.1, 'steel', 1); T.blob(6.4, 6.4, 1.4, 1.4, 'brass', 1); });
+  else if (kind === 'wheel') spr = pxArt(22, 22, 821, T => {
+    T.blob(11, 11, 10.4, 10.4, 'dark', 0); T.blob(11, 11, 6.6, 6.6, 'alloy', 0);
+    T.line(11, 5.2, 11, 16.8, 1.2, 'steel', 1); T.line(5.2, 11, 16.8, 11, 1.2, 'steel', 1);
+    T.line(6.6, 6.6, 15.4, 15.4, 1, 'steel', 1); T.line(15.4, 6.6, 6.6, 15.4, 1, 'steel', 1);
+    T.blob(11, 11, 2.5, 2.5, 'brass', 1); });
   gunCache.set(key, spr); return spr;
 }
 /* ================= the war, heard =================
@@ -1865,9 +1877,9 @@ function drawGun(g){
 }
 function drawHulk(hk){
   const sx = isoX(hk.fx, 53.1), sy = isoY(hk.fx, 53.1, 0);
-  ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(sx, sy + 5, 34, 6, 0, 0, 6.29); ctx.fill();
-  ctx.drawImage(gunSprite('lorry', false), Math.round(sx - 40), Math.round(sy - 30));
-  ctx.fillStyle = 'rgba(10,8,5,.62)'; ctx.fillRect(Math.round(sx - 40), Math.round(sy - 30), 80, 34); }
+  ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(sx, sy + 5, 64, 8, 0, 0, 6.29); ctx.fill();
+  ctx.drawImage(gunSprite('lorry', false), Math.round(sx - 62), Math.round(sy - 44));
+  ctx.fillStyle = 'rgba(10,8,5,.62)'; ctx.fillRect(Math.round(sx - 62), Math.round(sy - 44), 124, 50); }
 function drawSawPit(){
   const bx = isoX(19.5, 46), by = isoY(19.5, 46, 0);
   ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.ellipse(bx, by + 3, 30, 6, 0, 0, 6.29); ctx.fill();
@@ -2007,16 +2019,16 @@ function drawPlane(){
 function drawCart(){
   const c = sim.cart; if (!c.active && c.fx < -8) return;
   const sx = isoX(c.fx, 50.5), sy = isoY(c.fx, 50.5, 0);
-  ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(sx, sy + 5, 34, 6, 0, 0, 6.29); ctx.fill();
+  ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(sx, sy + 5, 64, 8, 0, 0, 6.29); ctx.fill();
   const spr = gunSprite('lorry', false), wheel = gunSprite('wheel', false);
-  ctx.drawImage(spr, Math.round(sx - 40), Math.round(sy - 30));
-  if (c.phase === 'wreck'){ ctx.fillStyle = 'rgba(12,9,6,.52)'; ctx.fillRect(Math.round(sx - 40), Math.round(sy - 30), 80, 34);
-    ctx.fillStyle = 'rgba(255,120,40,.5)'; ctx.beginPath(); ctx.ellipse(sx + 6, sy - 12, 5 + Math.sin(perfT * 9) * 1.4, 3, 0, 0, 6.29); ctx.fill(); return; }
+  ctx.drawImage(spr, Math.round(sx - 62), Math.round(sy - 44));
+  if (c.phase === 'wreck'){ ctx.fillStyle = 'rgba(12,9,6,.52)'; ctx.fillRect(Math.round(sx - 62), Math.round(sy - 44), 124, 50);
+    ctx.fillStyle = 'rgba(255,120,40,.5)'; ctx.beginPath(); ctx.ellipse(sx + 8, sy - 20, 6 + Math.sin(perfT * 9) * 1.6, 3.6, 0, 0, 6.29); ctx.fill(); return; }
   const spin = (c.vCur || 0) > 0.15 ? c.fx * 2.2 : 0.4;
-  [[-24, 0], [20, 0]].forEach(([wx]) => { ctx.save(); ctx.translate(sx + wx, sy + 1); ctx.rotate(spin);
-    ctx.drawImage(wheel, -8, -8); ctx.restore(); });
+  [[-36, 0], [38, 0]].forEach(([wx]) => { ctx.save(); ctx.translate(sx + wx, sy - 3); ctx.rotate(spin);
+    ctx.drawImage(wheel, -11, -11); ctx.restore(); });
   if (c.phase === 'unload' && c.cargo){ const left = Object.values(c.cargo).reduce((a, b) => a + b, 0), boxes = Math.ceil(left / 5);
-    for (let i = 0; i < Math.min(4, boxes); i++){ ctx.fillStyle = i % 2 ? '#6d5c3e' : '#7d6a48'; ctx.fillRect(Math.round(sx - 16 + i * 9), Math.round(sy - 26 - (i > 1 ? 5 : 0)), 8, 6); } }
+    for (let i = 0; i < Math.min(4, boxes); i++){ ctx.fillStyle = i % 2 ? '#6d5c3e' : '#7d6a48'; ctx.fillRect(Math.round(sx - 52 + i * 11), Math.round(sy - 50 - (i > 1 ? 6 : 0)), 9, 7); } }
   if (c.active && c.phase !== 'unload' && rng() < 0.3) sim.parts.push({ kind:'steam', fx: c.fx + 0.8, fy: 50.5, z: 0.4, ox: 0, h: 22, vh: rr(8, 13), life: rr(.7, 1.2), t: 0, col:'120,118,112', r: rr(1.8, 3) });
 }
 /* ================= Painterly props: baked pixels, the salvage design language =================
