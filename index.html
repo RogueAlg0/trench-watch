@@ -1765,6 +1765,155 @@ function gunSprite(kind, enemy){
     T.blob(11, 11, 2.5, 2.5, 'brass', 1); });
   gunCache.set(key, spr); return spr;
 }
+
+/* ================= The lorry fleet: three lorries, three loads (sheet 16) =================
+   The Tilt hauls dry stores under canvas, the Open Bed heavy bulk in the open,
+   the Veteran is a bowser and hauls water and oil only. The convoy sends the
+   kind whose load the depot is shortest of. Sprites draw at the men's bake
+   scale; the bake carries its own contact shadow, so no separate shadow or
+   wheel sprites any more. Wrecks are the same bake under a dark wash. */
+const LORRY_SCALE = 46 / 76;
+const LORRY_KINDS = {
+  A: { cargo: { food: 6, med: 2, cable: 2 }, name: 'The canvas tilt', top: 2.6 },
+  B: { cargo: { logs: 5, shells: 6, ammo: 8 }, name: 'The open-bed lorry', top: 2.35 },
+  C: { cargo: { water: 6, oil: 2 }, name: 'The old bowser', top: 2.15 } };
+const LORRY_WANT = { food: 22, med: 9, cable: 8, logs: 12, shells: 44, ammo: 32, water: 26, oil: 9 };
+const lorryCache = new Map(), lorryWreckCache = new Map();
+function lorrySprite(kind){ if (!lorryCache.has(kind)) lorryCache.set(kind, bakeLorryPix(kind, 9100 + kind.charCodeAt(0))); return lorryCache.get(kind); }
+function lorryWreck(kind){ if (!lorryWreckCache.has(kind)){ const spr = lorrySprite(kind), c = document.createElement('canvas');
+    c.width = spr.width; c.height = spr.height; const g = c.getContext('2d');
+    g.drawImage(spr, 0, 0); g.globalCompositeOperation = 'source-atop'; g.fillStyle = 'rgba(14,11,7,0.78)'; g.fillRect(0, 0, c.width, c.height);
+    lorryWreckCache.set(kind, c); } return lorryWreckCache.get(kind); }
+function pickLorryKind(){ const D = sim.stocks.depot; let best = 'A', bestScore = -1;
+  for (const k of ['A', 'B', 'C']){ let sc = 0; for (const com in LORRY_KINDS[k].cargo){ const w = LORRY_WANT[com] || 10;
+      sc += Math.max(0, w - (D[com] || 0)) / w; }
+    if (sc > bestScore + 0.01 || (Math.abs(sc - bestScore) <= 0.01 && k !== sim.cart.lastKind)){ best = k; bestScore = sc; } }
+  return best; }
+function bakeLorryPix(variant, seed){
+  return pxArt(284, 184, seed, T => {
+    const { set, blob, line, rect, R } = T;
+    const OX = 70, OY = 54, SX = 35, SY = 17.5, SZ = 34;
+    const P = (x, y, z) => [OX + (x - y) * SX, OY + (x + y) * SY - z * SZ];
+    const poly = (pts, m, tone) => {                       // scanline fill in pixel space
+      const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+      const x0 = Math.max(0, Math.floor(Math.min(...xs))), x1 = Math.min(283, Math.ceil(Math.max(...xs)));
+      const y0 = Math.max(0, Math.floor(Math.min(...ys))), y1 = Math.min(183, Math.ceil(Math.max(...ys)));
+      for (let py = y0; py <= y1; py++) for (let px = x0; px <= x1; px++){
+        let inside = false;
+        for (let i = 0, j = pts.length - 1; i < pts.length; j = i++){
+          const [xi, yi] = pts[i], [xj, yj] = pts[j];
+          if ((yi > py) !== (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi) + xi) inside = !inside; }
+        if (inside) set(px, py, m, tone); } };
+    const edge = (a, b) => line(a[0], a[1], b[0], b[1], 0.8, 'dark', 2);
+    const wheel = (wx, wy, near) => { const [cx, cy] = P(wx, wy, 0.36);
+      blob(cx, cy, near ? 12.5 : 10.5, near ? 12.5 : 10.5, 'dark', 2);
+      blob(cx, cy, near ? 7 : 5.5, near ? 7 : 5.5, 'dark', 1);
+      blob(cx, cy, 2.7, 2.7, 'brass', 1); };
+
+    /* the contact shadow: two soft dark pools under the mass, blob-noised
+       like the airships' ground shadows */
+    { const [mx, my] = P(2.55, 0.95, 0); blob(mx, my + 4, 108, 16.5, 'dark', 2);
+      const [fx2, fy2] = P(4.85, 0.95, 0); blob(fx2, fy2 + 3, 38, 11, 'dark', 2);
+      const [rx2, ry2] = P(0.35, 0.95, 0); blob(rx2, ry2 + 3, 34, 11, 'dark', 2); }
+
+    wheel(0.95, 0.04, false); wheel(4.62, 0.04, false);    // far wheels, mostly hidden
+
+    /* the chassis shadow line */
+    line(...P(0.1, 1.8, 0.40), ...P(5.2, 1.55, 0.40), 2.2, 'dark', 2);
+
+    /* the bed: rear end and near side, timber (dust) with plank seams */
+    poly([P(0, 0, 0.42), P(0, 1.8, 0.42), P(0, 1.8, 1.06), P(0, 0, 1.06)], 'dust', 2);
+    const bedTop = variant === 'B' ? 1.06 : (variant === 'C' ? 0.62 : 0.78);
+    poly([P(0, 1.8, 0.42), P(3.3, 1.8, 0.42), P(3.3, 1.8, bedTop), P(0, 1.8, bedTop)], 'dust', 1);
+    for (const zz of [0.56, 0.68]) if (zz < bedTop) line(...P(0.04, 1.81, zz), ...P(3.26, 1.81, zz), 0.7, 'dark', 2);
+    for (let bx = 0.55; bx < 3.3; bx += 0.55) line(...P(bx, 1.81, 0.44), ...P(bx, 1.81, bedTop - 0.02), 0.6, 'dark', 2);
+
+    if (variant === 'B'){
+      /* the open bed: a dark inside, then the load */
+      poly([P(0, 0, 1.06), P(3.3, 0, 1.06), P(3.3, 1.8, 1.06), P(0, 1.8, 1.06)], 'dark', 2);
+      const boxAt = (bx, by, bz, sx, sy, sz, m) => {
+        poly([P(bx, by + sy, bz), P(bx + sx, by + sy, bz), P(bx + sx, by + sy, bz + sz), P(bx, by + sy, bz + sz)], m, 1);
+        poly([P(bx + sx, by, bz), P(bx + sx, by + sy, bz), P(bx + sx, by + sy, bz + sz), P(bx + sx, by, bz + sz)], m, 2);
+        poly([P(bx, by, bz + sz), P(bx + sx, by, bz + sz), P(bx + sx, by + sy, bz + sz), P(bx, by + sy, bz + sz)], m, 0);
+        edge(P(bx, by + sy, bz + sz), P(bx + sx, by + sy, bz + sz)); };
+      boxAt(0.30, 0.22, 1.06, 0.82, 0.85, 0.60, 'dust');
+      boxAt(1.28, 0.45, 1.06, 0.68, 0.70, 0.50, 'bone');
+      boxAt(0.42, 0.30, 1.66, 0.60, 0.62, 0.44, 'wax');
+      { const [cx, cy] = P(2.35, 0.55, 1.62);              // a barrel: body, hoops, lid
+        poly([[cx - 10, cy], [cx + 10, cy], [cx + 8, cy + 19], [cx - 8, cy + 19]], 'rust', 2);
+        line(cx - 9.4, cy + 6, cx + 9.4, cy + 6, 0.8, 'dark', 2); line(cx - 8.8, cy + 13, cx + 8.8, cy + 13, 0.8, 'dark', 2);
+        blob(cx, cy, 10, 4.6, 'rust', 0); }
+      { const [tx, ty] = P(2.95, 0.95, 1.30);              // a rolled tarp at the bed front
+        blob(tx, ty, 12, 6, 'wax', 0); line(tx - 6, ty - 5, tx - 6, ty + 5, 0.8, 'dark', 2); line(tx + 5, ty - 5, tx + 5, ty + 5, 0.8, 'dark', 2); }
+    } else if (variant === 'A') {
+      /* the tilt: canvas over hoops, side, top and rear faces */
+      poly([P(0.06, 1.8, 0.78), P(3.24, 1.8, 0.78), P(3.24, 1.8, 1.38), P(2.6, 1.8, 1.58), P(0.7, 1.8, 1.58), P(0.06, 1.8, 1.38)], 'wax', 1);
+      poly([P(0.06, 0, 1.38), P(0.7, 0, 1.58), P(2.6, 0, 1.58), P(3.24, 0, 1.38), P(3.24, 1.8, 1.38), P(2.6, 1.8, 1.58), P(0.7, 1.8, 1.58), P(0.06, 1.8, 1.38)], 'wax', 0);
+      poly([P(0.06, 0, 0.78), P(0.06, 1.8, 0.78), P(0.06, 1.8, 1.38), P(0.06, 1.3, 1.58), P(0.06, 0.5, 1.58), P(0.06, 0, 1.38)], 'wax', 2);
+      for (const hx of [0.7, 1.35, 2.0, 2.65]){ line(...P(hx, 1.81, 0.80), ...P(hx, 1.81, 1.52), 0.7, 'dark', 2);
+        line(...P(hx, 1.82, 1.05), ...P(hx, 1.82, 0.46), 0.6, 'bone', 0); }        // rope ties
+      for (const hx of [1.35, 2.0]) line(...P(hx, 0.02, 1.52), ...P(hx, 1.78, 1.56), 0.7, 'dark', 2);   // the hoops continue over the top
+      line(...P(0.08, 0.9, 0.80), ...P(0.08, 0.9, 1.50), 0.7, 'dark', 2);            // a seam on the rear face
+    } else {
+      /* the veteran is a bowser: a riveted tank where the load was, so
+         nobody can mistake her for the tilt */
+      poly([P(0.22, 0.30, 1.30), P(3.08, 0.30, 1.30), P(3.08, 1.28, 1.30), P(0.22, 1.28, 1.30)], 'rust', 0);   // the tank top
+      poly([P(0.22, 1.28, 0.55), P(3.08, 1.28, 0.55), P(3.08, 1.28, 1.30), P(0.22, 1.28, 1.30)], 'rust', 1);   // the tank side
+      { const [ex, ey] = P(0.22, 0.79, 0.92); blob(ex, ey, 9, 13, 'rust', 2); blob(ex, ey, 6, 9.5, 'rust', 1); }   // the round rear end
+      for (const hx of [0.95, 1.65, 2.35]){ line(...P(hx, 1.29, 0.58), ...P(hx, 1.29, 1.28), 0.8, 'dark', 2);
+        line(...P(hx, 0.31, 1.31), ...P(hx, 1.27, 1.31), 0.8, 'dark', 2); }          // the hoops, side and over the top
+      poly([P(1.08, 1.29, 0.80), P(1.52, 1.29, 0.80), P(1.52, 1.29, 1.10), P(1.08, 1.29, 1.10)], 'bone', 1);   // a plate that does not match
+      { const [fx3, fy3] = P(1.80, 0.80, 1.36); blob(fx3, fy3, 3.2, 2.2, 'dark', 1); blob(fx3, fy3 - 1, 1.6, 1.2, 'brass', 1); }   // the filler cap
+      { const [vx, vy] = P(0.16, 1.05, 0.60); blob(vx, vy, 2.2, 2.2, 'brass', 1); line(vx, vy, vx - 3, vy + 5, 1, 'dark', 1); }   // the rear tap
+      { const [hx3, hy3] = P(2.62, 1.30, 0.88);                                       // a coiled hose on the flank
+        for (let a = 0; a < 6.28; a += 0.52) set(hx3 + Math.cos(a) * 6.5, hy3 + Math.sin(a) * 6.5, 'dark', 1); }
+    }
+
+    /* the cab: no box this time. The windshield leans back, the roof
+       curves down to meet it, a visor brim shades the glass, and a
+       running board runs under the door */
+    poly([P(3.25, 1.74, 0.40), P(4.50, 1.74, 0.40), P(4.58, 1.74, 1.04), P(4.34, 1.74, 1.62), P(4.05, 1.74, 1.76), P(3.48, 1.74, 1.78), P(3.25, 1.74, 1.60)], 'alloy', 1);
+    poly([P(4.58, 0.06, 1.04), P(4.58, 1.74, 1.04), P(4.34, 1.74, 1.62), P(4.34, 0.06, 1.62)], 'alloy', 2);   // the leaning windshield plane
+    poly([P(4.34, 0.06, 1.62), P(4.05, 0.06, 1.76), P(3.48, 0.06, 1.78), P(3.25, 0.06, 1.60), P(3.25, 1.74, 1.60), P(3.48, 1.74, 1.78), P(4.05, 1.74, 1.76), P(4.34, 1.74, 1.62)], 'alloy', 0);   // the curved roof
+    poly([P(3.66, 1.75, 1.10), P(4.44, 1.75, 1.06), P(4.26, 1.75, 1.54), P(3.70, 1.75, 1.56)], 'glass', 1);   // the side glass follows the lean
+    line(...P(4.08, 1.76, 1.08), ...P(3.96, 1.76, 1.55), 0.7, 'dark', 2);            // the quarter-light divider
+    { const [gx, gy] = P(3.84, 1.76, 1.44); set(gx, gy, 'bone', 0); set(gx + 1, gy, 'bone', 0); }   // the glint
+    line(...P(4.36, 1.77, 1.60), ...P(4.74, 1.77, 1.52), 2.4, 'dark', 1);            // the visor brim
+    line(...P(4.40, 1.77, 1.585), ...P(4.70, 1.77, 1.51), 0.8, 'bone', 0);
+    line(...P(3.52, 1.75, 0.44), ...P(3.52, 1.75, 1.58), 0.7, 'dark', 2);            // the door seam
+    line(...P(3.52, 1.75, 0.44), ...P(4.42, 1.75, 0.44), 0.7, 'dark', 2);
+    { const [hx, hy] = P(3.74, 1.76, 0.98); line(hx, hy, hx + 5, hy + 2.5, 1, 'dark', 1); }
+    poly([P(3.42, 1.88, 0.33), P(4.44, 1.88, 0.33), P(4.44, 1.88, 0.45), P(3.42, 1.88, 0.45)], 'dark', 1);   // the running board
+    if (variant === 'C'){ poly([P(3.34, 1.75, 0.52), P(4.44, 1.75, 0.52), P(4.44, 1.75, 0.68), P(3.34, 1.75, 0.68)], 'rust', 1);   // the livery band
+      poly([P(3.86, 1.75, 1.02), P(4.30, 1.75, 1.00), P(4.36, 1.75, 0.80), P(3.90, 1.75, 0.82)], 'rust', 2); }   // and a patched door
+
+    /* the bonnet: it slopes down to a rounded radiator shell */
+    poly([P(4.52, 1.52, 0.40), P(5.32, 1.52, 0.40), P(5.32, 1.52, 0.88), P(4.52, 1.52, 1.02)], 'alloy', 1);
+    poly([P(5.32, 0.28, 0.40), P(5.32, 1.52, 0.40), P(5.32, 1.52, 0.88), P(5.32, 0.28, 0.88)], 'alloy', 2);
+    poly([P(4.52, 0.28, 1.02), P(5.32, 0.28, 0.88), P(5.32, 1.52, 0.88), P(4.52, 1.52, 1.02)], 'alloy', 0);
+    { const [rx, ry] = P(5.32, 0.90, 0.90); blob(rx, ry, 15, 3.6, 'alloy', 0); }      // the bowed top of the shell
+    for (let i = 0; i < 3; i++) line(...P(5.33, 0.64, 0.52 + i * 0.12), ...P(5.33, 1.14, 0.52 + i * 0.12), 0.8, 'dark', 2);   // the grille
+    /* THE SIGNATURE: faced from the front, left a slit, right a circle */
+    { const [cx, cy] = P(5.34, 0.44, 0.78);
+      blob(cx, cy, 3.8, 3.8, 'dark', 1); blob(cx, cy, 2.0, 2.0, 'bone', 0);
+      set(cx + 3, cy - 2, 'bone', 0); set(cx - 3, cy + 2, 'bone', 0); }
+    { const [cx, cy] = P(5.34, 1.34, 0.78);
+      line(cx + 5.4, cy - 2.7, cx - 5.4, cy + 2.7, 3, 'dark', 1);
+      line(cx + 4.6, cy - 2.3, cx - 4.6, cy + 2.3, 1.2, 'bone', 0); }
+    /* the stack */
+    line(...P(3.30, 0.30, 1.20), ...P(3.30, 0.30, 2.22), 1.8, 'dark', 1);
+    { const [sx, sy] = P(3.30, 0.30, 2.22); rect(sx - 1.6, sy - 1, sx + 1.6, sy + 0.6, 'dark', 2); }
+
+    /* near wheels, over the body line */
+    wheel(0.95, 1.86, true); wheel(4.62, 1.86, true);
+    { const [cx, cy] = P(4.62, 1.86, 0.36);                       // a mudguard lip over the front wheel
+      for (let a = Math.PI * 1.04; a <= Math.PI * 1.96; a += 0.09) blob(cx + Math.cos(a) * 15, cy + Math.sin(a) * 12.5 - 1.5, 1.3, 1.3, 'alloy', 2); }
+
+    /* mud, thrown up the lower faces */
+    for (let i = 0; i < 46; i++){ const u = R() * 5.2, zz = 0.43 + R() * 0.16;
+      const [mx, my] = P(u, u < 3.3 ? 1.82 : 1.55, zz); set(mx, my, R() < 0.5 ? 'rust' : 'dark', 2); }
+  });
+}
 /* ================= the war, heard =================
    Procedural WebAudio: no files. Every sound is placed by distance and bearing from the camera,
    and throttled so a busy minute never becomes a wall of noise. Starts on the first gesture. */
@@ -1879,9 +2028,9 @@ function drawGun(g){
 }
 function drawHulk(hk){
   const sx = isoX(hk.fx, 53.1), sy = isoY(hk.fx, 53.1, 0);
-  ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(sx, sy + 5, 64, 8, 0, 0, 6.29); ctx.fill();
-  ctx.drawImage(gunSprite('lorry', false), Math.round(sx - 62), Math.round(sy - 44));
-  ctx.fillStyle = 'rgba(10,8,5,.62)'; ctx.fillRect(Math.round(sx - 62), Math.round(sy - 44), 124, 50); }
+  ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(sx, sy + 5, 84, 9, 0, 0, 6.29); ctx.fill();
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(lorryWreck(hk.kind || 'A'), Math.round(sx - 126 * LORRY_SCALE), Math.round(sy - 115 * LORRY_SCALE), 284 * LORRY_SCALE, 184 * LORRY_SCALE); }
 function drawSawPit(){
   const bx = isoX(19.5, 46), by = isoY(19.5, 46, 0);
   ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.ellipse(bx, by + 3, 30, 6, 0, 0, 6.29); ctx.fill();
@@ -2020,23 +2169,20 @@ function drawPlane(){
   ctx.save(); ctx.translate(sx, sy); ctx.scale(sc, sc); ctx.drawImage(spr, -66, -32); ctx.restore(); }
 function drawCart(){
   const c = sim.cart; if (!c.active && c.fx < -8) return;
-  const sx = isoX(c.fx, 50.5), sy = isoY(c.fx, 50.5, 0);
-  ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(sx, sy + 5, 64, 8, 0, 0, 6.29); ctx.fill();
-  const spr = gunSprite('lorry', false), wheel = gunSprite('wheel', false);
-  ctx.drawImage(spr, Math.round(sx - 62), Math.round(sy - 44));
-  if (c.phase === 'wreck'){ ctx.fillStyle = 'rgba(12,9,6,.52)'; ctx.fillRect(Math.round(sx - 62), Math.round(sy - 44), 124, 50);
-    ctx.fillStyle = 'rgba(255,120,40,.5)'; ctx.beginPath(); ctx.ellipse(sx + 8, sy - 20, 6 + Math.sin(perfT * 9) * 1.6, 3.6, 0, 0, 6.29); ctx.fill(); return; }
-  const spin = (c.vCur || 0) > 0.15 ? c.fx * 2.2 : 0.4;
-  [[-36, 0], [38, 0]].forEach(([wx]) => { ctx.save(); ctx.translate(sx + wx, sy - 3); ctx.rotate(spin);
-    ctx.drawImage(wheel, -11, -11); ctx.restore(); });
-  if (c.phase === 'unload' && c.cargo){ const left = Object.values(c.cargo).reduce((a, b) => a + b, 0), boxes = Math.ceil(left / 5);
-    for (let i = 0; i < Math.min(4, boxes); i++){ ctx.fillStyle = i % 2 ? '#6d5c3e' : '#7d6a48'; ctx.fillRect(Math.round(sx - 52 + i * 11), Math.round(sy - 50 - (i > 1 ? 6 : 0)), 9, 7); } }
+  const sx = isoX(c.fx, 50.5), sy = isoY(c.fx, 50.5, 0), kind = c.kind || 'A';
+  const W = 284 * LORRY_SCALE, H = 184 * LORRY_SCALE, ax = 126 * LORRY_SCALE, ay = 115 * LORRY_SCALE;
+  ctx.imageSmoothingEnabled = false;
+  if (c.phase === 'wreck'){ ctx.drawImage(lorryWreck(kind), Math.round(sx - ax), Math.round(sy - ay), W, H);
+    ctx.fillStyle = 'rgba(255,120,40,.5)'; ctx.beginPath(); ctx.ellipse(sx + 51, sy - 2, 7 + Math.sin(perfT * 9) * 1.8, 4, 0, 0, 6.29); ctx.fill(); return; }
+  ctx.drawImage(lorrySprite(kind), Math.round(sx - ax), Math.round(sy - ay), W, H);
+  if (c.phase === 'unload' && c.cargo && kind !== 'C'){ const left = Object.values(c.cargo).reduce((a, b) => a + b, 0), boxes = Math.ceil(left / 5);
+    for (let i = 0; i < Math.min(4, boxes); i++){ ctx.fillStyle = i % 2 ? '#6d5c3e' : '#7d6a48'; ctx.fillRect(Math.round(sx - 50 + i * 11), Math.round(sy - 36 - (i > 1 ? 6 : 0)), 9, 7); } }
   if (c.active && c.phase !== 'unload' && rng() < 0.3) sim.parts.push({ kind:'steam', fx: c.fx + 0.8, fy: 50.5, z: 0.4, ox: 0, h: 22, vh: rr(8, 13), life: rr(.7, 1.2), t: 0, col:'120,118,112', r: rr(1.8, 3) });
 }
 /* ================= Painterly props: baked pixels, the salvage design language =================
    Stamped alloy, a thruster-cowling stove, caged glow-cells, waxed canvas, brass.
    Sprites bake once per (kind, variant, frame) and are shared. Animation is frame-swap. */
-const PCOL = { alloy:'#62655a', glow:'#ffd98a', wax:'#7a6a4e', brass:'#9a7f4a', rust:'#7a4a2e', stone:'#8b8d88', paper:'#ddd6c4' };
+const PCOL = { alloy:'#62655a', glow:'#ffd98a', wax:'#7a6a4e', brass:'#9a7f4a', rust:'#7a4a2e', stone:'#8b8d88', paper:'#ddd6c4', dust:'#97835f', bone:'#cfc4a4', glass:'#46565e' };
 const PPAL3 = {}; for (const k in PMAT) PPAL3[k] = PPAL[k]; for (const k in PCOL) PPAL3[k] = pShades(PCOL[k]);
 const propCache = new Map();
 function pxArt(W, H, seed, fn){
@@ -4244,7 +4390,8 @@ function updateSystems(dt){
   const cart = sim.cart;
   sim.cartT = (sim.cartT ?? 60) - dt;
   if (!cart.active && sim.cartT <= 0){ cart.active = true; cart.fx = -6; cart.phase = 'in'; cart.vCur = 0;
-    cart.cargo = { food: 6, ammo: 8, shells: 6, logs: 5, water: 6, med: 2, cable: 2, oil: 2 };
+    cart.kind = pickLorryKind(); cart.lastKind = cart.kind;
+    cart.cargo = { ...LORRY_KINDS[cart.kind].cargo };
     sim.cartT = rr(170, 300); }
   if (cart.active){
     if (cart.phase === 'unload'){
@@ -4256,7 +4403,7 @@ function updateSystems(dt){
             if (free){ free.supplyJob = { com, qty: com === 'logs' ? 1 : 2, from: 'lorry', to: 'depot', phase: 'fetch' }; setState(free, 'idle', 0.2); } break; } } } }
       const left = Object.values(cart.cargo).reduce((a, b) => a + b, 0);
       if (left <= 0 && !sim.soldiers.some(x => x.supplyJob && x.supplyJob.from === 'lorry')){
-        cart.phase = 'out'; logEvent('supply', 'A lorry reaches the depot and is unloaded by hand.'); } }
+        cart.phase = 'out'; logEvent('supply', LORRY_KINDS[cart.kind || 'A'].name + ' reaches the depot and is unloaded by hand.'); } }
     else if (cart.phase === 'wreck'){
       if (!cart.party){ cart.partyT = (cart.partyT ?? 4) - dt;
         if (cart.partyT <= 0){ const hands = freeHands(4, [cart.fx, 49.2]).filter(h => !(cart.partyBan || []).includes(h.id)).slice(0, 2);
@@ -4268,11 +4415,11 @@ function updateSystems(dt){
             cart.party = null; cart.partyT = 3; cart.partyWait = 0; } }
         else if (crew.every(h => Math.hypot(h.fx - cart.fx, h.fy - 49.2) < 2.4)){ cart.partyWait = 0; cart.wreckT -= dt;
           if (rng() < dt * 2) puff(cart.fx + rr(-1, 1), 49.6, 0, 6, { tint: 'dark', r: rr(5, 9), a: 0.3 });
-          if (cart.wreckT <= 0){ sim.hulks.push({ fx: cart.fx }); cart.active = false; cart.phase = 'gone';
+          if (cart.wreckT <= 0){ sim.hulks.push({ fx: cart.fx, kind: cart.kind || 'A' }); cart.active = false; cart.phase = 'gone';
             crew.forEach(h => h.wreckJob = false); cart.party = null;
             logEvent('report', 'The wreck is dragged clear of the road. The way is open again.'); } } }
       if (rng() < dt * 1.4) puff(cart.fx + rr(-0.8, 0.8), 50.5, 0, 14, { tint: 'dark', r: rr(6, 11), a: 0.4 }); }
-    else { const top = cart.phase === 'out' ? 3.4 : 2.6;
+    else { const base = LORRY_KINDS[cart.kind || 'A'].top; const top = cart.phase === 'out' ? base * 1.3 : base;
       cart.vCur = Math.min(top, (cart.vCur || 0) + 1.1 * dt);
       cart.fx += cart.vCur * dt; cart.traceT = (cart.traceT || 0) - dt;
       if (cart.traceT <= 0){ cart.traceT = 0.5;
@@ -4988,7 +5135,7 @@ function newSim(planetName, seedStr){
     ledger: [], intel: [{ dmg: 0, ammo: 8, t: 0 }, { dmg: 0, ammo: 8, t: 0 }, { dmg: 0, ammo: 8, t: 0 }], intelWire: { down: false, t: 0 }, inflight: [], radioRetry: [], repT: 25, wireCut: null, order: null, pendingAssign: null, queue: [], freshScars: {}, works: null, works2: null, worksCycle: 0, searchlights: [], seedStr, planetName, moonOff: hash2(hashStr(seedStr + '|' + planetName), 5.1) * 29.5, cat: { fx: 44.5, fy: 36.4, z: 0, mode: 'sit', t: 3, tx: 44.5, ty: 36.4, faceA: 0 },
     bunkTaken: new Set(), bedTaken: new Set(), bearerJobs: [], spotted: null,
     missionQ: [], emMissionQ: [], dramaT: rr(26, 44), orderT: rr(50, 90), logisticsT: 4, batteryT: 2, talkT: 6,
-    cart: { active: false, fx: -6, dir: 1, t: rr(24, 44), phase: 'gone', cargo: null, vCur: 0 },
+    cart: { active: false, fx: -6, dir: 1, t: rr(24, 44), phase: 'gone', cargo: null, vCur: 0, kind: 'A', lastKind: null },
     saw: { active: false, pair: [], t: 0, stroke: 0 },
     social: [], socialT: 5, rumDay: -1, mailT: 260,
     busy: new Int16Array(MW * MH), busyCost: new Uint8Array(MW * MH), busyT: 0,
