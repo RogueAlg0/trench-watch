@@ -794,7 +794,7 @@ function arrive(s){
   else if (act === 'coverPost'){ setState(s, 'watch', rr(30, 60)); s.forceStance = 'prone'; }
   else if (act === 'epost'){ setState(s, 'watch', rr(6, 14)); }
   else if (act === 'erest'){ setState(s, 'idle', rr(2, 4)); }
-  else if (act === 'post'){ setState(s, 'watch', rr(4, 8)); }
+  else if (act === 'post'){ s.postX = s.tx; s.postY = s.ty; setState(s, 'watch', rr(4, 8)); }
   else if (act === 'despawn'){ s.gone = true; }
   else if (act === 'bunk'){ setState(s, 'sleep', rr(20, 40)); }
   else setState(s, 'idle', rr(0.5, 1.6));
@@ -3194,6 +3194,17 @@ function flareTick(dt){
     else { F.next -= dt;
       if (F.next <= 0){ F.next = rr(0.3, 0.7); if (front.length){ const k = ri(2, 4); for (let q = 0; q < k; q++) enemyShotAt(pick(front), 0.006); } }
       if (F.t <= 0){ F.mode = 'quiet'; F.t = rr(60, 120); F.next = rr(4, 9); sim.contact[i] *= 0.5; } } } }
+function postTick(dt){
+  sim.postT = (sim.postT ?? 0) - dt; if (sim.postT > 0) return; sim.postT = 2;
+  for (const s of sim.soldiers){
+    if (s.dead || s.enemy || s.state !== 'watch' || s.foe || s.path || s.hx === undefined) continue;
+    const px = s.postX !== undefined ? s.postX : s.hx, py = s.postY !== undefined ? s.postY : s.hy;
+    const post = tileAt(px, py); if (!post || !trenchLike(post)) continue;
+    const here = tileAt(Math.floor(s.fx), Math.floor(s.fy));
+    const displaced = Math.hypot(s.fx - (px + 0.5), s.fy - (py + 0.5)) > 1.3 || !here || !trenchLike(here);
+    if (displaced) goTo(s, px, py, { act: 'post', step: true, scramble: true });
+  }
+}
 function leaderTick(dt){
   sim.leaderT = (sim.leaderT ?? 0) - dt; sim.officerT = (sim.officerT ?? 0) - dt;
   sim.confuse = sim.confuse.map(c => Math.max(0, c - dt));
@@ -4053,7 +4064,8 @@ function physicsStep(dt){
         if (sDown || s.state === 'sleep' || s.state === 'watch') { ws = 0; wo = 1; }
         if (oDown || o.state === 'sleep' || o.state === 'watch') { wo = 0; ws = 1; }
         const ps = bodyPriority(s), po = bodyPriority(o);
-        if (ps > po) { ws *= 0.35; wo = 1 - ws; } else if (po > ps) { wo *= 0.35; ws = 1 - wo; }
+        const rooted = sDown || oDown || s.state === 'sleep' || s.state === 'watch' || o.state === 'sleep' || o.state === 'watch';
+        if (!rooted){ if (ps > po) { ws *= 0.35; wo = 1 - ws; } else if (po > ps) { wo *= 0.35; ws = 1 - wo; } }
         const cs = Math.min(0.085, overlap * ws), co = Math.min(0.085, overlap * wo);
         slidePush(s, -dx * cs, -dy * cs); slidePush(o, dx * co, dy * co);
         if (overlap > 0.09){ s.bumpT = 1; o.bumpT = 1; } } } }
@@ -4283,7 +4295,7 @@ function updateSystems(dt){
   if (sim.busyT <= 0 && sim.busy){ sim.busyT = 5; const B = sim.busy, BC = sim.busyCost;
     for (let i = 0; i < B.length; i++){ BC[i] = Math.min(30, B[i] * 3); B[i] = B[i] - (B[i] >> 2); } }
   enemyWorksTick(dt); enemyLifeTick(dt); duelTick(dt); leagueTick();
-  socialTick(dt); leaderTick(dt); flareTick(dt);
+  socialTick(dt); leaderTick(dt); postTick(dt); flareTick(dt);
   /* pacing: the war breathes. Stand-to hours are loud, midday is slow, night is tense and low. */
   sim.intensity ??= 0.3; sim.pulseT = Math.max(0, (sim.pulseT || 0) - dt);
   const hf = sim.hour;
