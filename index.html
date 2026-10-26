@@ -1734,6 +1734,10 @@ function buildProps(){
   P.push({ kind:'vane', fx: 23.5, fy: 43.5, z: 0 });
   P.push({ kind:'screen', fx: 84.5, fy: 33.5, z: 0 });
   P.push({ kind:'cratesDepot', fx: 15.5, fy: 43.5, z: 0 });
+  P.push({ kind:'cratesDepot', fx: 13.8, fy: 44.8, z: 0, variant: 1 });
+  P.push({ kind:'cratesDepot', fx: 18.3, fy: 41.8, z: 0, variant: 2 });
+  P.push({ kind:'barrel', fx: 12.6, fy: 42.2, z: 0 }); P.push({ kind:'barrel', fx: 13.2, fy: 41.7, z: 0 });
+  DEPOT_SPOTS.forEach(([fx, fy]) => { const t = tileAt(Math.floor(fx), Math.floor(fy)); if (t) t.boards = 1; });
   sim.map.sectors.forEach(sec => P.push({ kind:'dump', fx: sec.comm - 0.5, fy: trenchY(sec.comm) + 0.5, z: -1, sec: sec.id }));
   A.aidBeds.forEach(([gx, gy]) => P.push({ kind:'bed', fx: gx + 0.5, fy: gy + 0.5, z: 0 }));
   sim.map.hatchTiles.forEach(([gx, gy]) => P.push({ kind:'hatch', fx: gx + 0.5, fy: gy + 0.5, z: 0 }));
@@ -2742,6 +2746,11 @@ function freeHands(n, near){
     s.state !== 'down' && s.state !== 'sleep' && s.state !== 'watch' && (s.trade === 'carrier' || s.trade === 'rifle' || s.trade === 'sapper'))
     .sort((a, b) => ((b.trade === 'carrier' ? 1 : 0) - (a.trade === 'carrier' ? 1 : 0)) ||
       (near ? Math.hypot(a.fx - near[0], a.fy - near[1]) - Math.hypot(b.fx - near[0], b.fy - near[1]) : 0)).slice(0, n); }
+const DEPOT_SPOTS = [[13.5, 43.2], [15.5, 45.3], [17.5, 43.2], [16.8, 41.6]];
+function jobPos(j, node){ if (node === 'depot' && j.spot !== undefined) return DEPOT_SPOTS[j.spot]; return nodePos(node); }
+function claimDepotSpot(s, j){ const counts = [0, 0, 0, 0];
+  sim.soldiers.forEach(o => { if (o !== s && o.supplyJob && o.supplyJob.spot !== undefined && (o.supplyJob.from === 'depot' || o.supplyJob.to === 'depot')) counts[o.supplyJob.spot]++; });
+  let best = 0; for (let i = 1; i < 4; i++) if (counts[i] < counts[best]) best = i; j.spot = best; }
 function nodePos(node){
   const A = sim.map.anchors;
   if (node === 'depot') return A.depot; if (node === 'cook') return A.cook;
@@ -3492,15 +3501,16 @@ function updateSoldier(s, dt){
       else s.vig = { pose: 'repair', t: 0.35 };
       return; } }
   if (s.supplyJob){ const j = s.supplyJob;
-    if (j.phase === 'fetch'){ const [px, py] = nodePos(j.from);
+    if (j.spot === undefined && (j.from === 'depot' || j.to === 'depot')) claimDepotSpot(s, j);
+    if (j.phase === 'fetch'){ const [px, py] = jobPos(j, j.from);
       if (Math.hypot(px - s.fx, py - s.fy) > 1.35){ if (!s.path) goTo(s, px, py, {}); }
       else { s.vig = { pose: 'repair', t: 0.4 };
         if (!j.staged){ j.staged = true; const st = stockOf(j.from), take = Math.min(j.qty, Math.floor(st[j.com] || 0));
           if (take > 0){ st[j.com] -= take; j.qty = take; j.phase = 'haul'; s.carryCom = j.com;
-            const [tx, ty] = nodePos(j.to); goTo(s, tx, ty, { state: j.com === 'shells' ? 'carryShell' : 'carry' }); }
+            const [tx, ty] = jobPos(j, j.to); goTo(s, tx, ty, { state: j.com === 'shells' ? 'carryShell' : 'carry' }); }
           else j.wait = (j.wait || 0) + 0.001; }
         else { j.wait = (j.wait || 0) + dt; if (j.wait > 13){ s.supplyJob = null; setState(s, 'idle', rr(1, 2)); } } } }
-    else if (j.phase === 'haul'){ const [tx, ty] = nodePos(j.to);
+    else if (j.phase === 'haul'){ const [tx, ty] = jobPos(j, j.to);
       if (!s.path){ if (Math.hypot(tx - s.fx, ty - s.fy) > 1.5) goTo(s, tx, ty, { state: j.com === 'shells' ? 'carryShell' : 'carry' });
         else { j.phase = 'deposit'; j.t = 0.8; } } }
     else if (j.phase === 'deposit'){ s.vig = { pose: 'repair', t: 0.4 }; j.t -= dt;
