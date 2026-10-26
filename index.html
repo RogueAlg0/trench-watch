@@ -716,6 +716,18 @@ function soldierMove(s, dt){
      Someone close ahead means shuffle to your passing side; no room to shuffle
      means the lesser errand waits and eases back; a blocked node still counts. */
   let aimX = wx, aimY = wy, sq = 1, blockO = null, lastR = 0.05; let headOn = false;
+  if (!isLast && dist > 0.05 && !s.carryCas && s.state !== 'drag'){
+    const ct2 = tileAt(Math.floor(s.fx), Math.floor(s.fy)), nt2 = tileAt(node[0], node[1]);
+    if (ct2 && nt2 && trenchLike(ct2) && trenchLike(nt2)){
+      if (!sim.watchPosts || sim.t - (sim.watchPostsT || 0) > 1){ sim.watchPostsT = sim.t; sim.watchPosts = new Map();
+        for (const o of sim.soldiers) if (!o.dead && !o.gone && o.state === 'watch') sim.watchPosts.set(Math.floor(o.fx) + ',' + Math.floor(o.fy), [o.fx, o.fy]); }
+      let ox = (dy / dist) * 0.17, oy = (-dx / dist) * 0.17;
+      const wp = sim.watchPosts.get(node[0] + ',' + node[1]);
+      if (wp && Math.hypot(wx - ox - wp[0], wy - oy - wp[1]) > Math.hypot(wx + ox - wp[0], wy + oy - wp[1])){ ox = -ox; oy = -oy; }
+      const ot = tileAt(Math.floor(wx + ox), Math.floor(wy + oy));
+      if (ot && trenchLike(ot)){ aimX = wx + ox; aimY = wy + oy; }
+    }
+  }
   { const dirx = dx / (dist || 1), diry = dy / (dist || 1); let blockD = 1e9;
     for (const o of sim.soldiers){ if (o === s || o.dead || o.gone || o.climbing || o.state === 'down') continue;
       const rx = o.fx - s.fx, ry = o.fy - s.fy;
