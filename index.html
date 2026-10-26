@@ -1003,7 +1003,11 @@ function kgS(g, x, GY, pose, ph){
   const rifleFwd = (lean, len) => { kgL(g, x + 2, GY - 60, x + 26, GY - 61 - lean, 4.4, P.leather);
     kgL(g, x + 20, GY - 60.6 - lean * 0.7, x + (len || 40), GY - 62 - lean, 2.6, P.steel);
     if (CU.bayonet) kgL(g, x + (len || 40), GY - 62 - lean, x + (len || 40) + 9, GY - 62.6 - lean, 1.4, P.pale); };
-  if (pose === 'aim' || pose === 'fight'){ aL(x + 20, GY - 56); aR(x + 13, GY - 61); rifleFwd(pose === 'fight' ? 0 : 2); }
+  if (pose === 'aim'){ aL(x + 20, GY - 56); aR(x + 13, GY - 61); rifleFwd(2); }
+  else if (pose === 'fight'){ if (ph > 0.25){ aL(x + 18, GY - 58); aR(x + 12, GY - 70);
+      kgL(g, x + 2, GY - 60, x + 24, GY - 74, 4.4, P.leather); kgL(g, x + 19, GY - 72, x + 34, GY - 80, 2.6, P.steel); }
+    else { aL(x + 20, GY - 56); aR(x + 13, GY - 61); rifleFwd(0); } }
+  else if (pose === 'talk'){ if (ph > 0.25){ aL(x - 25, GY - 58); aR(x + 9, GY - 47); } else { aR(x + 25, GY - 59); aL(x - 19, GY - 40); } }
   else if (pose === 'thrust'){ aL(x + 22, GY - 57); aR(x + 15, GY - 61); rifleFwd(1, 58); }
   else if (pose === 'boltA' || pose === 'boltB'){ aL(x + 20, GY - 56); rifleFwd(2);
     if (pose === 'boltA'){ aR(x + 10.4, GY - 67); kgE(g, x + 8.6, GY - 68.4, 1.6, P.dark); }
@@ -1029,11 +1033,12 @@ function kgS(g, x, GY, pose, ph){
   else if (pose === 'ram'){ aL(x - 2, GY - 50); aR(x + 8, GY - 54);
     kgL(g, x - 15, GY - 36, x + 17, GY - 60, 2.6, P.leather); }
   else if (pose === 'lay'){ aL(x - 6, GY - 44); aR(x + 15, GY - 62); kgR(g, x + 15.4, GY - 66, 4.6, 5.6, P.dark); }
-  else if (pose === 'cook'){ aL(x - 12, GY - 44); aR(x + 11, GY - 62); kgL(g, x + 11, GY - 62, x + 15, GY - 70, 1.6, P.leather); }
-  else if (pose === 'crank'){ aL(x - 8, GY - 44); aR(x + 13, GY - 46);
-    kgR(g, x + 12, GY - 47, 8.4, 11, P.dark); kgE(g, x + 16.2, GY - 49.4, 1.7, P.steel); }
-  else if (pose === 'repair'){ aL(x - 10, GY - 44); aR(x + 14, GY - 63);
-    kgR(g, x + 12.4, GY - 67.4, 5.6, 3, P.steel); }
+  else if (pose === 'cook'){ aL(x - 12, GY - 44); if (ph > 0.25){ aR(x + 13, GY - 57); kgL(g, x + 13, GY - 57, x + 16, GY - 63, 1.6, P.leather); }
+    else { aR(x + 11, GY - 62); kgL(g, x + 11, GY - 62, x + 15, GY - 70, 1.6, P.leather); } }
+  else if (pose === 'crank'){ aL(x - 8, GY - 44); aR(x + 13, GY - (ph > 0.25 ? 41 : 46));
+    kgR(g, x + 12, GY - 47, 8.4, 11, P.dark); kgE(g, x + 16.2, GY - (ph > 0.25 ? 44.4 : 49.4), 1.7, P.steel); }
+  else if (pose === 'repair'){ aL(x - 10, GY - 44); aR(x + 14, GY - (ph > 0.25 ? 53 : 63));
+    kgR(g, x + 12.4, GY - (ph > 0.25 ? 57.4 : 67.4), 5.6, 3, P.steel); }
   else if (pose === 'barrel'){ aL(x - 14.4, GY - 42); aR(x + 15.4, GY - 42);
     kgR(g, x - 14, GY - 55, 29, 16.4, P.drum); kgL(g, x - 14, GY - 47, x + 15, GY - 47, 1.6, P.dark); }
   else { const swA = walking ? -sw * 4 : 0;
@@ -1095,7 +1100,11 @@ function kgEast(g, x, GY, pose, ph){
   const rifleE = (len) => { kgL(g, x - 2, GY - 60.6, x + 40, GY - 61.6, 4.2, P.leather);
     kgL(g, x + 30, GY - 61.2, x + (len || 40), GY - 62.2, 2.4, P.steel);
     if (CU.bayonet) kgL(g, x + (len || 40), GY - 62.2, x + (len || 40) + 9, GY - 62.6, 1.4, P.pale); };
-  if (pose === 'aim' || pose === 'fight'){ rifleE(); aN(x + 24, GY - 59.6); aF(x + 13, GY - 60.6); }
+  if (pose === 'aim'){ rifleE(); aN(x + 24, GY - 59.6); aF(x + 13, GY - 60.6); }
+  else if (pose === 'fight'){ if (ph > 0.25){ kgL(g, x - 2, GY - 60.6, x + 34, GY - 74, 4.2, P.leather);
+      kgL(g, x + 26, GY - 72, x + 40, GY - 78, 2.4, P.steel); aN(x + 20, GY - 68); aF(x + 12, GY - 62); }
+    else { rifleE(); aN(x + 24, GY - 59.6); aF(x + 13, GY - 60.6); } }
+  else if (pose === 'talk'){ if (ph > 0.25){ aN(x + 27, GY - 60); aF(x - 6, GY - 42); } else { aN(x + 4, GY - 44); aF(x + 24, GY - 57); } }
   else if (pose === 'thrust'){ rifleE(46); aN(x + 26, GY - 59.6); aF(x + 14, GY - 60.6); }
   else if (pose === 'boltA' || pose === 'boltB'){ rifleE(); aF(x + 13, GY - 60.6);
     if (pose === 'boltA'){ aN(x + 15, GY - 65); kgE(g, x + 12.6, GY - 66.6, 1.8, P.dark); } else aN(x + 24, GY - 59.6); }
@@ -1116,9 +1125,9 @@ function kgEast(g, x, GY, pose, ph){
   else if (pose === 'draw' || pose === 'sling'){ aN(x + 2, GY - 64); aF(x - 5, GY - 42);
     kgL(g, x - 12, GY - 46, x - 4, GY - 74, 4, P.leather); }
   else if (pose === 'lay'){ aN(x + 15, GY - 62); aF(x - 2, GY - 46); kgR(g, x + 15.4, GY - 66, 4.6, 5.6, P.dark); }
-  else if (pose === 'cook'){ aN(x + 12, GY - 60); aF(x - 2, GY - 46); kgL(g, x + 12, GY - 60, x + 16, GY - 68, 1.6, P.leather); }
-  else if (pose === 'crank'){ aN(x + 13, GY - 46); aF(x - 2, GY - 46); kgR(g, x + 12, GY - 47, 8.4, 11, P.dark); }
-  else if (pose === 'repair'){ aN(x + 14, GY - 62); aF(x - 2, GY - 46); kgR(g, x + 12.4, GY - 66.4, 5.6, 3, P.steel); }
+  else if (pose === 'cook'){ aN(x + 12, GY - (ph > 0.25 ? 55 : 60)); aF(x - 2, GY - 46); kgL(g, x + 12, GY - (ph > 0.25 ? 55 : 60), x + 16, GY - (ph > 0.25 ? 62 : 68), 1.6, P.leather); }
+  else if (pose === 'crank'){ aN(x + 13, GY - (ph > 0.25 ? 41 : 46)); aF(x - 2, GY - 46); kgR(g, x + 12, GY - 47, 8.4, 11, P.dark); }
+  else if (pose === 'repair'){ aN(x + 14, GY - (ph > 0.25 ? 53 : 62)); aF(x - 2, GY - 46); kgR(g, x + 12.4, GY - (ph > 0.25 ? 57.4 : 66.4), 5.6, 3, P.steel); }
   else if (pose === 'barrel'){ aN(x + 14, GY - 43); aF(x + 10, GY - 45); kgR(g, x + 2, GY - 55, 16, 16.4, P.drum); }
   else { const gv = [x + 3 - sw * 5, GY - 40]; aN(gv[0], gv[1]); aF(x - 5 - sw * 3, GY - 40);
     if (pose === 'stand' && CU.rifle){ kgL(g, gv[0] + 3, GY - 40, gv[0] + 5, GY - 8, 3.4, P.leather); kgL(g, gv[0] + 4, GY - 26, gv[0] + 6.6, GY - 45, 2.2, P.steel); } }
@@ -1173,7 +1182,7 @@ function kgN(g, x, GY, pose, ph){
   g.restore();
 }
 
-function kgSitE(g, x, GY, pose){
+function kgSitE(g, x, GY, pose, fr){
   const P = KG_P, CU = KG_CUR, B = P.beard;
   kgE(g, x, GY + 3, 27, 4.4, 'rgba(10,6,2,.4)');
   kgE(g, x - 15, GY - 64, 6.6, 12, P.leather); kgClump(g, x - 15, GY - 64, 8, 20, [P.leatherL, P.leather], x + 61, 6, 1.2);
@@ -1201,17 +1210,18 @@ function kgSitE(g, x, GY, pose){
   if (pose === 'clean'){
     kgL(g, x - 4, GY - 42, x + 32, GY - 46, 4.2, P.leather); kgL(g, x + 22, GY - 45.2, x + 44, GY - 47, 2.2, P.steel);
     kgL(g, x + 6, GY - 68, x + 17, GY - 45, 7.6, P.coat); kgE(g, x + 18, GY - 44.4, 4.2, 4.8, P.leather);
-    const sx = Math.sin(CU.seedKey * 2.3) * 3;
+    const sx = Math.sin(CU.seedKey * 2.3) * 3 + (fr ? 4.5 : -2.5);
     kgL(g, x + 4, GY - 66, x + 2 + sx, GY - 42, 7.6, P.coatD); kgE(g, x + 2 + sx, GY - 41.4, 4.6, 3.4, P.pale);
   } else if (CU.paper){
-    kgR(g, x + 0.4, GY - 47, 13, 9.4, P.pale); kgR(g, x + 0.4, GY - 47, 13, 1.8, '#b8b09a');
+    kgR(g, x + 0.4, GY - 47 - (fr ? 2 : 0), 13, 9.4, P.pale); kgR(g, x + 0.4, GY - 47 - (fr ? 2 : 0), 13, 1.8, '#b8b09a');
+    if (fr) kgR(g, x + 10.4, GY - 49, 3, 2.4, '#b8b09a');
     kgL(g, x + 3, GY - 68, x + 1, GY - 41, 7.6, P.coatD); kgE(g, x + 1, GY - 40.4, 4.2, 4.8, P.leather);
     kgL(g, x + 5, GY - 68, x + 11, GY - 40, 7.6, P.coat); kgE(g, x + 11.4, GY - 39.4, 4.2, 4.8, P.leather);
   } else {
     kgL(g, x + 3, GY - 68, x + 1, GY - 41, 7.6, P.coatD); kgE(g, x + 1, GY - 40.4, 4.2, 4.8, P.leather);
     kgL(g, x + 5, GY - 68, x + 11, GY - 40, 7.6, P.coat); kgE(g, x + 11.4, GY - 39.4, 4.2, 4.8, P.leather); }
 }
-function kgSitS(g, x, GY, pose){
+function kgSitS(g, x, GY, pose, fr){
   const P = KG_P, CU = KG_CUR, B = P.beard;
   kgE(g, x, GY + 3, 28, 4.4, 'rgba(10,6,2,.4)');
   g.beginPath(); g.moveTo(x - 14, GY - 76); g.quadraticCurveTo(x, GY - 80, x + 14, GY - 76);
@@ -1238,16 +1248,19 @@ function kgSitS(g, x, GY, pose){
   if (pose === 'clean'){
     kgL(g, x - 12, GY - 40, x + 14, GY - 43, 4, P.leather); kgL(g, x + 8, GY - 42.4, x + 22, GY - 44, 2.2, P.steel);
     kgL(g, x - 11, GY - 66, x - 4, GY - 42, 7.6, P.coatD); kgE(g, x - 3.4, GY - 41.4, 4.2, 4.8, P.leather);
-    kgL(g, x + 11, GY - 66, x + 4, GY - 44, 7.6, P.coat); kgE(g, x + 3.4, GY - 43.4, 4.4, 3.2, P.pale);
+    const chx = x + 3.4 + (fr ? 5 : -3);
+    kgL(g, x + 11, GY - 66, chx + 0.6, GY - 44, 7.6, P.coat); kgE(g, chx, GY - 43.4, 4.4, 3.2, P.pale);
   } else if (CU.paper){
-    kgR(g, x - 10, GY - 60, 20, 15.4, P.pale); kgR(g, x - 10, GY - 60, 20, 2, '#b8b09a');
+    kgR(g, x - 10, GY - 60 - (fr ? 2 : 0), 20, 15.4, P.pale); kgR(g, x - 10, GY - 60 - (fr ? 2 : 0), 20, 2, '#b8b09a');
+    if (fr) kgR(g, x + 7, GY - 62, 3, 2.6, '#b8b09a');
     g.strokeStyle = 'rgba(90,80,60,.55)'; g.lineWidth = 0.8;
     for (let i = 0; i < 3; i++){ g.beginPath(); g.moveTo(x - 7.4, GY - 55.6 + i * 3.4); g.lineTo(x + 5 + (i % 2) * 2.4, GY - 55.6 + i * 3.4); g.stroke(); }
     kgL(g, x - 12, GY - 68, x - 9, GY - 49, 7.6, P.coatD); kgE(g, x - 9, GY - 48.4, 4.2, 4.8, P.leather);
     kgL(g, x + 12, GY - 68, x + 10, GY - 49, 7.6, P.coat); kgE(g, x + 10, GY - 48.4, 4.2, 4.8, P.leather);
   } else {
-    kgL(g, x - 12, GY - 68, x - 5, GY - 42, 7.6, P.coatD); kgE(g, x - 4.6, GY - 41.4, 4.2, 4.8, P.leather);
-    kgL(g, x + 12, GY - 68, x + 5, GY - 42, 7.6, P.coat); kgE(g, x + 4.6, GY - 41.4, 4.2, 4.8, P.leather); }
+    const shx = fr ? 8 : 5, shy = fr ? GY - 38 : GY - 42;
+    kgL(g, x - 12, GY - 68, x - shx, shy, 7.6, P.coatD); kgE(g, x - shx + 0.4, shy + 0.6, 4.2, 4.8, P.leather);
+    kgL(g, x + 12, GY - 68, x + shx, shy, 7.6, P.coat); kgE(g, x + shx - 0.4, shy + 0.6, 4.2, 4.8, P.leather); }
 }
 function kgDown(g, x, GY, sleep){
   const P = KG_P, CU = KG_CUR, B = P.beard;
@@ -1311,7 +1324,7 @@ function kgPixelPass(cv, look){
     d[o] = pal[bi][0]; d[o + 1] = pal[bi][1]; d[o + 2] = pal[bi][2]; d[o + 3] = 255; }
   g.putImageData(img, 0, 0);
 }
-function kgSprite(s, pose, F){
+function kgSprite(s, pose, F, fr){
   const look = kgLook(s);
   look.paper = (s.vigPose === 'cards' || s.vigPose === 'read');
   look.rifle = ['rifle', 'sent', 'sapper'].includes(s.trade) || !!s.enemy;
@@ -1325,11 +1338,11 @@ function kgSprite(s, pose, F){
   } else if (pose === 'clean' || pose === 'sit'){
     cv = mk(76, 104); const g = cv.getContext('2d');
     g.translate(cv.width / 2, cv.height); const ks = cv.height / 120; g.scale(ks * look.girth, ks * look.height); g.translate(-60, -120);
-    if (F === 'E') kgSitE(g, 60, 112, pose); else kgSitS(g, 60, 112, pose);
+    if (F === 'E') kgSitE(g, 60, 112, pose, fr || 0); else kgSitS(g, 60, 112, pose, fr || 0);
   } else {
     cv = mk(76, 104); const g = cv.getContext('2d');
     g.translate(cv.width / 2, cv.height); const ks = cv.height / 120; g.scale(ks * look.girth, ks * look.height); g.translate(-60, -120);
-    const ph = pose === 'walkA' ? 0 : pose === 'walkA2' ? 0.25 : pose === 'walkB' ? 0.5 : pose === 'walkB2' ? 0.75 : 0;
+    const ph = pose === 'walkA' ? 0 : pose === 'walkA2' ? 0.25 : pose === 'walkB' ? 0.5 : pose === 'walkB2' ? 0.75 : (fr ? 0.5 : 0);
     const p2 = pose.indexOf('walk') === 0 ? 'walk' : pose;
     if (F === 'E') kgEast(g, 60, 112, p2, ph); else if (F === 'N') kgN(g, 60, 112, p2, ph); else kgS(g, 60, 112, p2, ph);
   }
@@ -1338,10 +1351,14 @@ function kgSprite(s, pose, F){
 }
 
 function pawnSprite(s, pose, F){
-  const key = ['KG', s.enemy ? 'E' : 'F', s.id, (s.record && s.record.wounds ? 'W' + Math.min(2, s.record.wounds) : ''), pose, F, s.squadMark || 0, s.bayonet ? 'B' : '',
+  const cycRate = pose === 'talk' ? 0.9 : pose === 'clean' ? 0.75 : pose === 'crank' ? 0.55 : pose === 'fight' ? 1.05 : pose === 'cook' ? 0.95 : pose === 'repair' ? 1.4 :
+    pose === 'sit' ? (s.vigPose === 'read' ? 1.8 : s.vigPose === 'cards' ? 1.25 : 2.6) : 0;
+  let fr = cycRate ? Math.floor(perfT / cycRate + s.id * 0.61) % 2 : 0;
+  if (pose === 'repair' && s.sawJob !== undefined && s.sawJob !== null && sim.saw) fr = sim.saw.stroke > 0.5 ? 1 : 0;
+  const key = ['KG', s.enemy ? 'E' : 'F', s.id, (s.record && s.record.wounds ? 'W' + Math.min(2, s.record.wounds) : ''), pose, fr, F, s.squadMark || 0, s.bayonet ? 'B' : '',
     (pose === 'stand' || pose.indexOf('walk') === 0) ? (s.weapon || 'back') : '', s.vigPose || ''].join('|');
   if (pawnCache.has(key)) return pawnCache.get(key);
-  const spr = kgSprite(s, pose, F);
+  const spr = kgSprite(s, pose, F, fr);
   if (spr.width === 76 && s.record && s.record.wounds > 0){ const g2 = spr.getContext('2d'); const R3 = mulberry32(5000 + s.id * 13);
     g2.strokeStyle = 'rgba(90, 46, 28, 0.9)'; g2.lineWidth = 1.8; g2.beginPath();
     const sx = 31 + R3() * 10, sy = 17 + R3() * 7; g2.moveTo(sx, sy); g2.lineTo(sx + 5 + R3() * 3, sy + 3); g2.stroke(); }
@@ -1589,6 +1606,7 @@ function pawnPoseOf(s){
   if ((s.pressT || 0) > 0) return 'press';
   const pose = s.vig ? s.vig.pose : s.state;
   s.vigPose = s.vig ? s.vig.pose : null;
+  if (pose === 'talk' || (s.talk && !s.path)) return 'talk';
   if (pose === 'watch' || pose === 'shoot') return 'aim';
   if (pose === 'cards' || pose === 'read') return 'sit';
   if (pose === 'grapple' || pose === 'scuffle' || pose === 'fight') return 'fight';
