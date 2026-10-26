@@ -646,6 +646,10 @@ function setState(s, st, dur){ s.state = st; s.tState = dur; s.stateAge = 0; }
 function goTo(s, gx, gy, opts){
   opts = opts || {};
   let path = findPath(Math.floor(s.fx), Math.floor(s.fy), gx, gy, opts);
+  if (!path && !opts.scramble) path = findPath(Math.floor(s.fx), Math.floor(s.fy), gx, gy, { ...opts, scramble: true });
+  /* last resort above: a man with no path at all stands forever (lip tiles
+     at the trench edge refuse every plain order), so on total failure let
+     him climb. The retry fires only when no route exists, never before. */
   if (!path) return false;
   if (path.length > 2){ // string pulling: straighten what the ground allows, pin what it does not.
     // Climbs, ladder edges and sharp corners stay pinned; between pins, pull to the
