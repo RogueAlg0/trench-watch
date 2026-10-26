@@ -274,8 +274,8 @@ function findPath(sx, sy, tx, ty, opts){
   if (typeof sim !== 'undefined' && sim && sim.soldiers) for (const o of sim.soldiers){
     if (o.dead || o.gone) continue;
     if (o.state === 'watch' || o.state === 'sleep' || o.talk || o.inBed || (sim.queue && sim.queue.includes(o.id))){
-      const k = Math.floor(o.fx) + ',' + Math.floor(o.fy);
-      if (k !== sx + ',' + sy) blocked.add(k); } }
+      const k = Math.floor(o.fy) * MW + Math.floor(o.fx);
+      if (k !== sy * MW + sx) blocked.add(k); } }
   /* the trench is the road; the open field is for errands. Ordinary travel routes
      through the diggings first, and only crosses exposed ground when the errand
      itself is out there (a patrol post, a sap head, a man down in the open). */
@@ -283,7 +283,8 @@ function findPath(sx, sy, tx, ty, opts){
   if (!opts.exposeOk && !exposedTile(goal) && !exposedTile(start))
     p = bfsPath(sx, sy, tx, ty, { ...opts, trenchRoad: true }, blocked);
   if (!p) p = bfsPath(sx, sy, tx, ty, opts, blocked);
-  return p || bfsPath(sx, sy, tx, ty, opts, null);
+  if (p || !blocked.size) return p;   /* empty blocked set: the third search is the second one again */
+  return bfsPath(sx, sy, tx, ty, opts, null);
 }
 function exposedTile(t){ return !!t && (t.type === 'ground' || t.type === 'crater') && t.gy > enemyY(t.gx) + 1 && t.gy < trenchY(t.gx) - 1; }
 function tileCost(t, trenchRoad){
@@ -306,9 +307,24 @@ function tileCost(t, trenchRoad){
   if (trenchRoad && exposedTile(t)) c *= 40;
   return c;
 }
+/* integer ladder edges, built once per map; the string set stays the source of truth */
+function ladInt(){
+  const L = sim.map.ladders;
+  if (sim.map._liSrc === L) return sim.map._li;
+  const s = new Set();
+  for (const k of L){ const gt = k.indexOf('>');
+    const a = k.slice(0, gt).split(','), b = k.slice(gt + 1).split(',');
+    s.add((+a[1] * MW + +a[0]) * 8192 + (+b[1] * MW + +b[0])); }
+  sim.map._li = s; sim.map._liSrc = L; return s; }
+/* per-search tile-cost cache: costs cannot change during one synchronous
+   search, so each tile is priced once per search, not once per relaxation */
+const _costNorm = new Float32Array(MW * MH), _costRoad = new Float32Array(MW * MH);
+const _seenNorm = new Int32Array(MW * MH), _seenRoad = new Int32Array(MW * MH);
+let _costGen = 0;
 function bfsPath(sx, sy, tx, ty, opts, blocked){
-  const key = (x, y) => x + ',' + y;
-  const gScore = new Map([[key(sx, sy), 0]]), prev = new Map([[key(sx, sy), null]]);
+  const grid = sim.grid, lad = ladInt();
+  const sIdx = sy * MW + sx, tIdx = ty * MW + tx;
+  const gScore = new Map([[sIdx, 0]]), prev = new Map([[sIdx, null]]);
   const heap = []; let ins = 0;
   const hpush = (f, h, x, y) => { heap.push([f, h, ins++, x, y]);
     let i = heap.length - 1;
@@ -322,26 +338,34 @@ function bfsPath(sx, sy, tx, ty, opts, blocked){
         if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m; } }
     return top; };
   const heur = (x, y) => (Math.abs(x - tx) + Math.abs(y - ty)) * 90;
+  const road = !!opts.trenchRoad;
+  const cArr = road ? _costRoad : _costNorm, cSeen = road ? _seenRoad : _seenNorm;
+  const gen = ++_costGen;
+  const costOf = (t, idx) => { if (cSeen[idx] === gen) return cArr[idx];
+    const c = tileCost(t, road); cArr[idx] = c; cSeen[idx] = gen; return c; };
   hpush(heur(sx, sy), heur(sx, sy), sx, sy);
   const closed = new Set();
   while (heap.length){ const [, , , cx, cy] = hpop();
-    const ck = key(cx, cy);
-    if (closed.has(ck)) continue; closed.add(ck);
+    const cIdx = cy * MW + cx;
+    if (closed.has(cIdx)) continue; closed.add(cIdx);
     if (cx === tx && cy === ty) break;
-    const ct = tileAt(cx, cy), cg = gScore.get(ck);
+    const ct = grid[cy][cx], cg = gScore.get(cIdx);
     for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
-      const nx = cx + dx, ny = cy + dy, nt = tileAt(nx, ny), nk = key(nx, ny);
-      if (!nt || closed.has(nk) || !walkable(nt, opts.enemy)) continue;
-      if (blocked && blocked.has(nk) && !(nx === tx && ny === ty)) continue;
+      const nx = cx + dx, ny = cy + dy;
+      if (nx < 0 || ny < 0 || nx >= MW || ny >= MH) continue;
+      const nIdx = ny * MW + nx;
+      if (closed.has(nIdx)) continue;
+      const nt = grid[ny][nx];
+      if (!walkable(nt, opts.enemy)) continue;
+      if (blocked && nIdx !== tIdx && blocked.has(nIdx)) continue;
       const dz = Math.abs(nt.z - ct.z);
-      const ladderEdge = sim.map.ladders.has(ck + '>' + nk);
-      if (dz > 0.6 && !ladderEdge && !opts.scramble) continue;
-      const ng = cg + tileCost(nt, opts.trenchRoad);
-      if (ng < (gScore.get(nk) ?? Infinity)){ gScore.set(nk, ng); prev.set(nk, [cx, cy]);
+      if (dz > 0.6 && !opts.scramble && !lad.has(cIdx * 8192 + nIdx)) continue;
+      const ng = cg + costOf(nt, nIdx);
+      if (ng < (gScore.get(nIdx) ?? Infinity)){ gScore.set(nIdx, ng); prev.set(nIdx, [cx, cy]);
         const hh = heur(nx, ny); hpush(ng + hh, hh, nx, ny); } } }
-  if (!prev.has(key(tx, ty))) return null;
+  if (!prev.has(tIdx)) return null;
   const path = []; let cur = [tx, ty];
-  while (cur){ path.unshift(cur); cur = prev.get(key(cur[0], cur[1])); }
+  while (cur){ path.unshift(cur); cur = prev.get(cur[1] * MW + cur[0]); }
   return path;
 }
 function supercoverClear(x0, y0, x1, y1, enemy){
@@ -643,13 +667,20 @@ function makeSoldier(role, postTile){
     knock: null, stepAcc: 0, lastTile: '', queueSlot: -1, orderFx: 0, squad: -1, squadMark: 0, bond: null, bias: null };
 }
 function setState(s, st, dur){ s.state = st; s.tState = dur; s.stateAge = 0; }
+function lippy(gx, gy){ const t = tileAt(gx, gy); if (!t) return false;
+  for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]){ const n = tileAt(gx + dx, gy + dy);
+    if (n && Math.abs(n.z - t.z) > 0.6) return true; } return false; }
 function goTo(s, gx, gy, opts){
   opts = opts || {};
   let path = findPath(Math.floor(s.fx), Math.floor(s.fy), gx, gy, opts);
-  if (!path && !opts.scramble) path = findPath(Math.floor(s.fx), Math.floor(s.fy), gx, gy, { ...opts, scramble: true });
+  if (!path && !opts.scramble && (lippy(Math.floor(s.fx), Math.floor(s.fy)) || lippy(gx, gy)))
+    path = findPath(Math.floor(s.fx), Math.floor(s.fy), gx, gy, { ...opts, scramble: true });
   /* last resort above: a man with no path at all stands forever (lip tiles
      at the trench edge refuse every plain order), so on total failure let
-     him climb. The retry fires only when no route exists, never before. */
+     him climb. The retry fires only when no route exists, never before,
+     and only when an endpoint of the order touches a lip: a failure with
+     no lip at either end is a blocked or sealed goal, and paying a second
+     full exhaustive search for it was pure frame-spike tax. */
   if (!path) return false;
   if (path.length > 2){ // string pulling: straighten what the ground allows, pin what it does not.
     // Climbs, ladder edges and sharp corners stay pinned; between pins, pull to the
