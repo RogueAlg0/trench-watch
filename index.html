@@ -824,11 +824,11 @@ function pShades(hex){ const n = parseInt(hex.slice(1), 16), r = n >> 16 & 255, 
   return [f(0.6), f(1), f(1.3)]; }
 const PPAL = {}; for (const k in PMAT) PPAL[k] = pShades(PMAT[k]);
 const shadowCache = new Map();
-function pawnShadow(spr){ if (shadowCache.has(spr)) return shadowCache.get(spr);
+function pawnShadow(spr){ if (shadowCache.has(spr)){ const hitS = shadowCache.get(spr); shadowCache.delete(spr); shadowCache.set(spr, hitS); return hitS; }
   const c = document.createElement('canvas'); c.width = spr.width; c.height = spr.height;
   const g = c.getContext('2d'); g.drawImage(spr, 0, 0); g.globalCompositeOperation = 'source-in';
   g.fillStyle = 'rgba(22,17,10,1)'; g.fillRect(0, 0, c.width, c.height);
-  if (shadowCache.size > 500) shadowCache.clear();
+  if (shadowCache.size > 560){ let evS = 0; for (const kS of shadowCache.keys()){ shadowCache.delete(kS); if (++evS >= 80) break; } }
   shadowCache.set(spr, c); return c; }
 const KGT = Math.PI * 2;
 /* ================= KINDRED GENERATOR (5.0): every soldier grown from his seed =================
@@ -1624,7 +1624,7 @@ function pawnPoseOf(s){
 }
 const ribbonCache = new Map();
 function scarfRibbon(s, bucket, wet){ const key = s.id + '|' + bucket + '|' + (wet ? 1 : 0);
-  if (ribbonCache.has(key)) return ribbonCache.get(key);
+  if (ribbonCache.has(key)){ const hitR = ribbonCache.get(key); ribbonCache.delete(key); ribbonCache.set(key, hitR); return hitR; }
   const SC = scarfOf(s); const cv = document.createElement('canvas'); cv.width = 20; cv.height = 24; const g = cv.getContext('2d');
   const sway = (bucket - 2) * 1.5;
   for (let seg = 0; seg < 3; seg++){ const w = 8 - seg, y0 = seg * 8, cx = 10 + sway * seg * 1.5, x0 = Math.round(cx - w / 2);
@@ -1635,7 +1635,7 @@ function scarfRibbon(s, bucket, wet){ const key = s.id + '|' + bucket + '|' + (w
   const tipX = 10 + sway * 3; g.fillStyle = SC.hex;
   for (let i = 0; i < 4; i++) g.fillRect(Math.round(tipX - 3.4 + i * 2.3), 21, 1, 3);
   if (wet){ g.fillStyle = 'rgba(24,26,38,0.28)'; g.fillRect(0, 0, 20, 24); }
-  if (ribbonCache.size > 700) ribbonCache.clear();
+  if (ribbonCache.size > 760){ let evR = 0; for (const kR of ribbonCache.keys()){ ribbonCache.delete(kR); if (++evR >= 100) break; } }
   ribbonCache.set(key, cv); return cv; }
 function drawMan(s){
   const sx = isoX(s.fx, s.fy), sy = isoY(s.fx, s.fy, s.z + (s.onStep && !s.path ? 0.55 : 0));
@@ -4949,6 +4949,32 @@ function vegTick(dt){
     if (sim.veg[i] < target) sim.veg[i] = Math.min(target, sim.veg[i] + dt * 0.0012);
     if (sim.vegScorch[i] > 0) sim.vegScorch[i] = Math.max(0, sim.vegScorch[i] - dt * 0.0008); }
 }
+const tuftCache = new Map();
+/* DESKTOP PERF: the grass is baked once per tile and density, then leaned by the wind.
+   The blade layout inside the bake is the old live stroke layout, hash for hash. */
+function tuftSprite(gx, gy, t, vv){
+  const vi = gy * MW + gx;
+  const reed = t.type === 'crater' && sim.water > 3;
+  const scorch = sim.vegScorch[vi] > 0.4;
+  const hasPoppy = ((sim.graveSet && sim.graveSet.has(vi)) || (t.type === 'crater' && t.rubble < 0.2)) && hash2(gx * 3.3 + 5, gy * 7.9 + 2) < 0.16;
+  const bucket = Math.round(vv * 5);
+  const key = vi + '|' + bucket + '|' + (scorch ? 1 : 0) + '|' + (reed ? 1 : 0) + '|' + (hasPoppy ? 1 : 0);
+  if (tuftCache.has(key)){ const hitT = tuftCache.get(key); tuftCache.delete(key); tuftCache.set(key, hitT); return hitT; }
+  const cv = document.createElement('canvas'); cv.width = 128; cv.height = 72;
+  const g = cv.getContext('2d'); g.scale(2, 2); g.translate(32, 26);
+  const n = 1 + Math.floor(vv * 4);
+  for (let i2 = 0; i2 < n; i2++){ const h1 = hash2(gx * 13.7 + i2 * 7.1, gy * 9.3 - i2 * 3.7), h2v = hash2(gx * 5.9 - i2 * 4.3, gy * 15.1 + i2 * 6.9);
+    const bx = (h1 - 0.5) * 44, by = (h2v - 0.5) * 12 + 4, hh = (reed ? 14 : 9.5) * (0.55 + vv * 0.6) * (0.7 + h2v * 0.6);
+    g.strokeStyle = scorch ? '#3a352c' : (reed ? '#9a9474' : ['#6a6b45', '#767a50', '#59603a', '#8a8558'][(h1 * 4) | 0]);
+    g.lineWidth = 1.5; g.beginPath();
+    for (let b = -1; b <= 1; b++){ g.moveTo(bx + b * 2.2, by); g.quadraticCurveTo(bx + b * 2.6, by - hh * 0.6, bx + b * 3.4, by - hh); }
+    g.stroke(); }
+  if (hasPoppy){ const px2 = (hash2(gx * 9.1, gy * 4.7) - 0.5) * 30, py2 = 3;
+    g.strokeStyle = '#5c6038'; g.lineWidth = 1.1; g.beginPath(); g.moveTo(px2, py2);
+    g.quadraticCurveTo(px2, py2 - 4, px2, py2 - 7); g.stroke();
+    g.fillStyle = '#b3402f'; g.beginPath(); g.arc(px2, py2 - 7.5, 1.9, 0, 6.29); g.fill(); }
+  if (tuftCache.size > 3000){ let evT = 0; for (const kT of tuftCache.keys()){ tuftCache.delete(kT); if (++evT >= 300) break; } }
+  tuftCache.set(key, cv); return cv; }
 function drawTileFx(t){
   const { gx, gy, z } = t;
   const cx = isoX(gx + 0.5, gy + 0.5), cy = isoY(gx + 0.5, gy + 0.5, z);
@@ -4991,18 +5017,9 @@ function drawTileFx(t){
     const gust = Math.sin(perfT * 1.3 + gx * 0.35 + gy * 0.21) * 0.5 + Math.sin(perfT * 2.7 + gx * 0.8) * 0.3;
     const sway = gust * (1.1 + sim.rain * 2.2) + (sim.windX || 0) * 0.06 + Math.cos(bA) * bend * 3.2;
     const drop = Math.sin(bA) * bend * 2.2 + sim.rain * 0.9;
-    const n = 1 + Math.floor(vv * 4), reed = t.type === 'crater' && sim.water > 3;
-    for (let i2 = 0; i2 < n; i2++){ const h1 = hash2(gx * 13.7 + i2 * 7.1, gy * 9.3 - i2 * 3.7), h2v = hash2(gx * 5.9 - i2 * 4.3, gy * 15.1 + i2 * 6.9);
-      const bx = cx + (h1 - 0.5) * 44, by = cy + (h2v - 0.5) * 12 + 4, hh = (reed ? 14 : 9.5) * (0.55 + vv * 0.6) * (0.7 + h2v * 0.6);
-      ctx.strokeStyle = sim.vegScorch[vi] > 0.4 ? '#3a352c' : (reed ? '#9a9474' : ['#6a6b45', '#767a50', '#59603a', '#8a8558'][(h1 * 4) | 0]);
-      ctx.lineWidth = 1.5; ctx.beginPath();
-      for (let b = -1; b <= 1; b++){ ctx.moveTo(bx + b * 2.2, by); ctx.quadraticCurveTo(bx + b * 2.6 + sway * 0.4, by - hh * 0.6, bx + b * 3.4 + sway, by - hh + drop); }
-      ctx.stroke(); }
-    if ((sim.graveSet && sim.graveSet.has(vi)) || (t.type === 'crater' && t.rubble < 0.2)){
-      if (hash2(gx * 3.3 + 5, gy * 7.9 + 2) < 0.16){ const px2 = cx + (hash2(gx * 9.1, gy * 4.7) - 0.5) * 30, py2 = cy + 3;
-        ctx.strokeStyle = '#5c6038'; ctx.lineWidth = 1.1; ctx.beginPath(); ctx.moveTo(px2, py2);
-        ctx.quadraticCurveTo(px2 + sway * 0.4, py2 - 4, px2 + sway, py2 - 7); ctx.stroke();
-        ctx.fillStyle = '#b3402f'; ctx.beginPath(); ctx.arc(px2 + sway, py2 - 7.5, 1.9, 0, 6.29); ctx.fill(); } } }
+    const tspr = tuftSprite(gx, gy, t, vv);
+    ctx.save(); ctx.translate(cx, cy + 6); ctx.transform(1, 0, clamp(-sway * 0.05, -0.35, 0.35), 1, 0, drop * 0.35);
+    ctx.drawImage(tspr, -32, -32, 64, 36); ctx.restore(); }
 }
 function visibleRange(){
   const c = [[-VW / 2, -VH / 2], [VW / 2, -VH / 2], [-VW / 2, VH / 2], [VW / 2, VH / 2]].map(([sx, sy]) => {
@@ -5024,32 +5041,33 @@ function draw(){
   const vr = visibleRange();
   for (let gy = vr.y0; gy <= vr.y1; gy++) for (let gx = vr.x0; gx <= vr.x1; gx++){ const t = tileAt(gx, gy); if (t) drawTileFx(t); }
   const items = [];
-  sim.props.forEach(p => items.push({ k: p.fx + p.fy, f: () => drawProp(p) }));
-  sim.guns.forEach(g => items.push({ k: g.fx + g.fy + 0.4, f: () => drawGun(g) }));
-  sim.eguns.forEach(g => items.push({ k: g.fx + g.fy + 0.4, f: () => drawGun(g) }));
+  const inV = (fx, fy, m) => fx >= vr.x0 - m && fx <= vr.x1 + m && fy >= vr.y0 - m && fy <= vr.y1 + m;
+  sim.props.forEach(p => { if (inV(p.fx, p.fy, 3)) items.push({ k: p.fx + p.fy, f: () => drawProp(p) }); });
+  sim.guns.forEach(g => { if (inV(g.fx, g.fy, 3)) items.push({ k: g.fx + g.fy + 0.4, f: () => drawGun(g) }); });
+  sim.eguns.forEach(g => { if (inV(g.fx, g.fy, 3)) items.push({ k: g.fx + g.fy + 0.4, f: () => drawGun(g) }); });
   for (let i = 0; i < sim.graves && i < sim.map.graveTiles.length; i++){ const [gx, gy] = sim.map.graveTiles[i];
-    items.push({ k: gx + gy + 0.6, f: () => drawProp({ kind: 'grave', fx: gx + 0.5, fy: gy + 0.5, z: 0 }) }); }
-  if (sim.cart && sim.cart.active) items.push({ k: sim.cart.fx + 50.5, f: () => drawCart() });
-  sim.hulks.forEach(hk => items.push({ k: hk.fx + 53.4, f: () => drawHulk(hk) }));
-  items.push({ k: 19.5 + 46 + 0.45, f: () => drawSawPit() });
-  sim.crates.forEach(cr => items.push({ k: cr.fx + cr.fy + 0.35, f: () => drawCrate(cr) }));
-  sim.drops.forEach(dr => items.push({ k: dr.fx + dr.fy + 0.45, f: () => drawDrop(dr) }));
-  if (sim.plane.active){ items.push({ k: sim.plane.fx + sim.plane.fy - 0.2, f: () => drawPlaneShadow() });
+    if (inV(gx + 0.5, gy + 0.5, 2)) items.push({ k: gx + gy + 0.6, f: () => drawProp({ kind: 'grave', fx: gx + 0.5, fy: gy + 0.5, z: 0 }) }); }
+  if (sim.cart && sim.cart.active && inV(sim.cart.fx, 50.5, 5)) items.push({ k: sim.cart.fx + 50.5, f: () => drawCart() });
+  sim.hulks.forEach(hk => { if (inV(hk.fx, hk.fy || 53.4, 4)) items.push({ k: hk.fx + 53.4, f: () => drawHulk(hk) }); });
+  if (inV(19.5, 46, 4)) items.push({ k: 19.5 + 46 + 0.45, f: () => drawSawPit() });
+  sim.crates.forEach(cr => { if (inV(cr.fx, cr.fy, 3)) items.push({ k: cr.fx + cr.fy + 0.35, f: () => drawCrate(cr) }); });
+  sim.drops.forEach(dr => { if (inV(dr.fx, dr.fy, 3)) items.push({ k: dr.fx + dr.fy + 0.45, f: () => drawDrop(dr) }); });
+  if (sim.plane.active && inV(sim.plane.fx, sim.plane.fy, 12)){ items.push({ k: sim.plane.fx + sim.plane.fy - 0.2, f: () => drawPlaneShadow() });
     items.push({ k: 1e5 + 3, f: () => drawPlane() }); }
-  sim.soldiers.forEach(s => { if (!s.gone) items.push({ k: s.fx + s.fy + 0.3, f: () => drawMan(s) }); });
-  if (sim.cat) items.push({ k: sim.cat.fx + sim.cat.fy + 0.32, f: () => drawCat() });
-  if (sim.duels) sim.duels.forEach(D => items.push({ k: D.fx + D.fy + 0.28, f: () => drawDuel(D) }));
+  sim.soldiers.forEach(s => { if (!s.gone && inV(s.fx, s.fy, 4)) items.push({ k: s.fx + s.fy + 0.3, f: () => drawMan(s) }); });
+  if (sim.cat && inV(sim.cat.fx, sim.cat.fy, 3)) items.push({ k: sim.cat.fx + sim.cat.fy + 0.32, f: () => drawCat() });
+  if (sim.duels) sim.duels.forEach(D => { if (inV(D.fx, D.fy, 3)) items.push({ k: D.fx + D.fy + 0.28, f: () => drawDuel(D) }); });
   if (sim.works) items.push({ k: 1e5, f: () => drawWorks() });
-  sim.searchlights.forEach(sl => items.push({ k: sl.gx + sl.gy + 0.95, f: () => {
+  sim.searchlights.forEach(sl => { if (!inV(sl.gx + 0.5, sl.gy + 0.5, 3)) return; items.push({ k: sl.gx + sl.gy + 0.95, f: () => {
     const bx = isoX(sl.gx + 0.5, sl.gy + 0.5), by = isoY(sl.gx + 0.5, sl.gy + 0.5, -1);
     ctx.strokeStyle = 'rgba(52,42,30,.95)'; ctx.lineWidth = 3; ctx.lineCap = 'round';
     ctx.beginPath(); ctx.moveTo(bx - 7, by); ctx.lineTo(bx, by - 30); ctx.lineTo(bx + 7, by); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(bx - 7, by - 14); ctx.lineTo(bx + 7, by - 14); ctx.stroke();
     ctx.fillStyle = '#2c2620'; ctx.fillRect(bx - 4.5, by - 36, 9, 7);
-    ctx.fillStyle = '#574f40'; ctx.fillRect(bx - 3, by - 34.6, 6, 4); } }));
+    ctx.fillStyle = '#574f40'; ctx.fillRect(bx - 3, by - 34.6, 6, 4); } }); });
   if (sim.wallFaces) sim.wallFaces.forEach(f => { if (f.gx >= vr.x0 - 2 && f.gx <= vr.x1 + 2 && f.gy >= vr.y0 - 2 && f.gy <= vr.y1 + 2)
     items.push({ k: f.gx + f.gy + 1.55, f: () => drawNearFace(f) }); });
-  sim.parts.forEach(p => items.push({ k: (p.fx ?? p.tx ?? 0) + (p.fy ?? p.ty ?? 0) + 0.5, f: () => drawPart(p) }));
+  sim.parts.forEach(p => { const pfx = p.fx ?? p.tx ?? 0, pfy = p.fy ?? p.ty ?? 0; if (inV(pfx, pfy, 6)) items.push({ k: pfx + pfy + 0.5, f: () => drawPart(p) }); });
   items.sort((a, b) => a.k - b.k).forEach(it => it.f());
   ctx.restore();
   if (sim.snow > 0.03){ ctx.fillStyle = `rgba(232,238,244,${sim.snow * 0.13})`; ctx.fillRect(0, 0, VW, VH); }
