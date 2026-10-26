@@ -1357,13 +1357,22 @@ function pawnSprite(s, pose, F){
   if (pose === 'repair' && s.sawJob !== undefined && s.sawJob !== null && sim.saw) fr = sim.saw.stroke > 0.5 ? 1 : 0;
   const key = ['KG', s.enemy ? 'E' : 'F', s.id, (s.record && s.record.wounds ? 'W' + Math.min(2, s.record.wounds) : ''), pose, fr, F, s.squadMark || 0, s.bayonet ? 'B' : '',
     (pose === 'stand' || pose.indexOf('walk') === 0) ? (s.weapon || 'back') : '', s.vigPose || ''].join('|');
-  if (pawnCache.has(key)) return pawnCache.get(key);
+  if (pawnCache.has(key)){ const hit = pawnCache.get(key); pawnCache.delete(key); pawnCache.set(key, hit); return hit; }
   const spr = kgSprite(s, pose, F, fr);
   if (spr.width === 76 && s.record && s.record.wounds > 0){ const g2 = spr.getContext('2d'); const R3 = mulberry32(5000 + s.id * 13);
     g2.strokeStyle = 'rgba(90, 46, 28, 0.9)'; g2.lineWidth = 1.8; g2.beginPath();
     const sx = 31 + R3() * 10, sy = 17 + R3() * 7; g2.moveTo(sx, sy); g2.lineTo(sx + 5 + R3() * 3, sy + 3); g2.stroke(); }
-  if (pawnCache.size > 2600) pawnCache.clear();
-  pawnCache.set(key, spr); return spr;
+  if (pawnCache.size > 2600){ let ev = 0; for (const k of pawnCache.keys()){ pawnCache.delete(k); if (++ev >= 260) break; } }
+  pawnCache.set(key, spr);
+  if (cycRate){ const frC = Math.floor(perfT / cycRate + s.id * 0.61) % 2, fr2 = 1 - frC;
+    if (fr2 !== fr){ const key2 = ['KG', s.enemy ? 'E' : 'F', s.id, (s.record && s.record.wounds ? 'W' + Math.min(2, s.record.wounds) : ''), pose, fr2, F, s.squadMark || 0, s.bayonet ? 'B' : '',
+      (pose === 'stand' || pose.indexOf('walk') === 0) ? (s.weapon || 'back') : '', s.vigPose || ''].join('|');
+      if (!pawnCache.has(key2)){ const spr2 = kgSprite(s, pose, F, fr2);
+        if (spr2.width === 76 && s.record && s.record.wounds > 0){ const g3 = spr2.getContext('2d'); const R4 = mulberry32(5000 + s.id * 13);
+          g3.strokeStyle = 'rgba(90, 46, 28, 0.9)'; g3.lineWidth = 1.8; g3.beginPath();
+          const sx2 = 31 + R4() * 10, sy2 = 17 + R4() * 7; g3.moveTo(sx2, sy2); g3.lineTo(sx2 + 5 + R4() * 3, sy2 + 3); g3.stroke(); }
+        pawnCache.set(key2, spr2); } } }
+  return spr;
 }
 function buildPawnCanvas(s, pose, F){
   /* Painterly II: silhouette first. Helmet brim and scrim, coat skirt, webbing and pouches,
