@@ -1866,9 +1866,9 @@ function gunSprite(kind, enemy){
     for (let i = 0; i < 26; i++){ const a = i / 26 * 6.28, bx = 44 + Math.cos(a) * 37, by = 16 + Math.sin(a) * 11;
       if (Math.sin(a) > 0.72 && i % 2) continue;                                  // the gap at the back, where the crew works
       T.blob(bx, by, 4.6, 2.6, i % 3 ? 'cloth' : 'wax', i % 2 ? 0 : 1); }
-    T.blob(44, 16, 31, 8.8, 'timber', 1); T.blob(44, 16, 21, 5.8, 'dark', 1); });
+    T.blob(44, 16, 31, 8.8, 'timber', 1); T.blob(44, 16, 21, 5.8, 'dark', 1); }, true);
   else if (kind === 'shell') spr = pxArt(6, 12, 813, T => {
-    T.rect(1.4, 4, 4.6, 11, 'brass', 1); T.blob(3, 2.6, 1.8, 2.4, 'steel', 1); T.rect(1.4, 9.4, 4.6, 11, 'brass', 0); });
+    T.rect(1.4, 4, 4.6, 11, 'brass', 1); T.blob(3, 2.6, 1.8, 2.4, 'steel', 1); T.rect(1.4, 9.4, 4.6, 11, 'brass', 0); }, true);
   else if (kind === 'gun') spr = pxArt(66, 42, enemy ? 817 : 816, T => {
     const mx = enemy ? 4 : 62, bx = enemy ? 30 : 36;
     T.line(32, 25, 13, 40, 2.8, 'alloy', 0); T.line(32, 25, 51, 40, 2.8, 'alloy', 0);       // trail legs
@@ -1883,7 +1883,7 @@ function gunSprite(kind, enemy){
     T.line(bx, 14, mx, 2.4, 4.2, 'steel', 0);                                                // the barrel
     T.line(lerp(bx, mx, 0.82), lerp(14, 2.4, 0.82), mx, 2.4, 5.8, 'dark', 0);                // muzzle brake
     T.blob(bx - (enemy ? -2.4 : 2.4), 15.6, 2.6, 3, 'dark', 1); T.set(bx, 12.4, 'brass', 2); // breech + sight
-  });
+  }, true);
   else if (kind === 'lorry') spr = pxArt(124, 50, 819, T => {
     T.rect(4, 40, 120, 44, 'dark', 0);                                                        // chassis shadow line
     T.rect(4, 16, 78, 40, 'alloy', 0);                                                        // the bed: deep alloy
@@ -1903,12 +1903,12 @@ function gunSprite(kind, enemy){
     for (let gy = 20; gy <= 30; gy += 3) T.set(120, gy, 'dark', 1);                           // grille
     T.blob(26, 41, 13.5, 5, 'dark', 0); T.blob(100, 41, 13.5, 5, 'dark', 0);                  // wheel arches
     for (let i = 0; i < 46; i++){ const mx = 5 + T.R() * 114, my = 42.6 + T.R() * 3.6; T.set(mx, my, T.R() < 0.4 ? 'rust' : 'dark', 0); }   // mud at the skirts
-  });
+  }, true);
   else if (kind === 'wheel') spr = pxArt(22, 22, 821, T => {
     T.blob(11, 11, 10.4, 10.4, 'dark', 0); T.blob(11, 11, 6.6, 6.6, 'alloy', 0);
     T.line(11, 5.2, 11, 16.8, 1.2, 'steel', 1); T.line(5.2, 11, 16.8, 11, 1.2, 'steel', 1);
     T.line(6.6, 6.6, 15.4, 15.4, 1, 'steel', 1); T.line(15.4, 6.6, 6.6, 15.4, 1, 'steel', 1);
-    T.blob(11, 11, 2.5, 2.5, 'brass', 1); });
+    T.blob(11, 11, 2.5, 2.5, 'brass', 1); }, true);
   gunCache.set(key, spr); return spr;
 }
 
@@ -2058,7 +2058,7 @@ function bakeLorryPix(variant, seed){
     /* mud, thrown up the lower faces */
     for (let i = 0; i < 46; i++){ const u = R() * 5.2, zz = 0.43 + R() * 0.16;
       const [mx, my] = P(u, u < 3.3 ? 1.82 : 1.55, zz); set(mx, my, R() < 0.5 ? 'rust' : 'dark', 2); }
-  });
+  }, true);
 }
 /* ================= the war, heard =================
    Procedural WebAudio: no files. Every sound is placed by distance and bearing from the camera,
@@ -2331,7 +2331,7 @@ function drawCart(){
 const PCOL = { alloy:'#62655a', glow:'#ffd98a', wax:'#7a6a4e', brass:'#9a7f4a', rust:'#7a4a2e', stone:'#8b8d88', paper:'#ddd6c4', dust:'#97835f', bone:'#cfc4a4', glass:'#46565e', ember:'#c33d21', teal:'#3f6f66' };
 const PPAL3 = {}; for (const k in PMAT) PPAL3[k] = PPAL[k]; for (const k in PCOL) PPAL3[k] = pShades(PCOL[k]);
 const propCache = new Map();
-function pxArt(W, H, seed, fn){
+function pxArt(W, H, seed, fn, ol){
   const R = mulberry32(seed);
   const g = Array.from({ length: H }, () => new Array(W).fill(null));
   const noise = (x, y) => { const v = Math.sin(x * 12.9898 + y * 78.233 + seed * 3.7) * 43758.5453; return v - Math.floor(v); };
@@ -2350,8 +2350,16 @@ function pxArt(W, H, seed, fn){
     let tone = cell.tone; const nz = noise(x * 1.7, y * 1.3);
     if (nz > 0.86) tone = Math.max(0, tone - 1); else if (nz < 0.1) tone = Math.min(2, tone + 1);
     let [r, gg, b] = PPAL3[cell.m][tone];
-    const gr = 0.92 + noise(x * 3.1, y * 2.7) * 0.16; r *= gr; gg *= gr; b *= gr;
+    const gr = (0.92 + noise(x * 3.1, y * 2.7) * 0.16) * (ol ? (0.94 + 0.10 * (1 - y / Math.max(1, H - 1))) : 1); r *= gr; gg *= gr; b *= gr;
     const i = (y * W + x) * 4; img.data[i] = r; img.data[i + 1] = gg; img.data[i + 2] = b; img.data[i + 3] = 255; }
+    if (ol){ const lum = (r, gg, b) => 0.35 * r + 0.5 * gg + 0.15 * b;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++){ if (g[y][x]) continue;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]){ const nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue; const cell = g[ny][nx]; if (!cell) continue;
+        const c = PPAL3[cell.m][cell.tone], L = lum(c[0], c[1], c[2]);
+        if (L < 52 || L > 178) continue;   /* selective: only mid-value edges need the line */
+        const d = PPAL3[cell.m][0], i = (y * W + x) * 4;
+        img.data[i] = d[0] * 0.62; img.data[i + 1] = d[1] * 0.62; img.data[i + 2] = d[2] * 0.62; img.data[i + 3] = 255; break; } } }
   c2.putImageData(img, 0, 0); return out;
 }
 /* ================= TITLE ART: the name board and the dawn banner =================
@@ -2434,7 +2442,7 @@ function propSprite(kind, variant, frame){
   if (propCache.has(key)) return propCache.get(key);
   const seed = 4000 + variant * 331 + frame * 71 + kind.length * 17;
   let spr = null;
-  const A = (W, H, fn) => pxArt(W, H, seed, fn);
+  const A = (W, H, fn) => pxArt(W, H, seed, fn, true);
   const cloth = (T, x0, y0, w, h, field, wind, phase, emblem) => {
     for (let x = 0; x <= w; x++){ const k = x / w;
       const yOff = wind === 0 ? x * 0.34 : Math.sin(x * (wind === 2 ? 0.62 : 0.4) + phase * 2.1) * (wind === 2 ? 2 : 1.3) * k;
