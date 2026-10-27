@@ -481,44 +481,55 @@ const texWall = new Image(); texWall.src = 'assets/tex-wall-px.png';
 const texReady = im => im.complete && im.naturalWidth > 0;
 [texGround, texWall].forEach(im => im.addEventListener('load', () => { if (sim) buildCache(); }));
 function paintWallTexture(x1, y1, x2, y2, x3, y3, x4, y4, key){
-  if (!texReady(texWall)){ poly([[x1, y1], [x2, y2], [x3, y3], [x4, y4]], 'rgba(30,23,15,1)'); return; }
-  const W = texWall.naturalWidth, H = texWall.naturalHeight;
-  const sw = W * 0.24, sh = H, sx = Math.floor(hash2(key, 7.7) * (W - sw)), sy = 0;
-  const ux = x2 - x1, uy = y2 - y1, vx = x4 - x1, vy = y4 - y1;
-  ctx.save();
-  ctx.transform(ux / sw, uy / sw, vx / sh, vy / sh, x1 - sx * ux / sw, y1 - sx * uy / sw);
-  ctx.beginPath(); ctx.rect(sx, sy, sw, sh); ctx.clip();
-  ctx.drawImage(texWall, 0, 0);
+  /* the wall in the game's own hand: seeded earth, timber revetment bands
+     and posts, grain, grime at the base, a broken earth lip on top. The
+     photographic strata texture read as wicker fencing at face scale. */
+  const R = mulberry32(((key * 977) | 0) >>> 0 || 1);
+  const P = (u, v) => [lerp(lerp(x1, x2, u), lerp(x4, x3, u), v), lerp(lerp(y1, y2, u), lerp(y4, y3, u), v)];
+  const quad = (u0, v0, u1, v1, fill) => { const a = P(u0, v0), b = P(u1, v0), c = P(u1, v1), d = P(u0, v1);
+    ctx.fillStyle = fill; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.lineTo(c[0], c[1]); ctx.lineTo(d[0], d[1]); ctx.closePath(); ctx.fill(); };
+  quad(0, 0, 1, 1, ['#4a3a24', '#524026', '#463521', '#4e3d28'][(R() * 4) | 0]);
+  ctx.save(); ctx.beginPath(); { const a = P(0, 0), b = P(1, 0), c = P(1, 1), d = P(0, 1);
+    ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.lineTo(c[0], c[1]); ctx.lineTo(d[0], d[1]); ctx.closePath(); } ctx.clip();
+  for (let i = 0; i < 42; i++){ const u = R(), v = R(), lt = R() < 0.5, pt = P(u, v);
+    ctx.strokeStyle = lt ? 'rgba(16,12,7,' + (0.08 + R() * 0.1).toFixed(2) + ')' : 'rgba(196,164,110,' + (0.05 + R() * 0.07).toFixed(2) + ')';
+    ctx.lineWidth = 0.8 + R() * 1.2; ctx.beginPath(); ctx.moveTo(pt[0], pt[1]); ctx.lineTo(pt[0] + 2 + R() * 5, pt[1] + 1 + R() * 2); ctx.stroke(); }
   ctx.restore();
-  const gr = ctx.createLinearGradient(0, y1, 0, y4);
-  gr.addColorStop(0, 'rgba(24,17,10,.12)'); gr.addColorStop(1, 'rgba(6,4,2,.44)');
+  [0.3 + R() * 0.1, 0.62 + R() * 0.1].forEach(v => { if (R() < 0.34) return;
+    quad(0, v, 1, v + 0.12, ['#6b543a', '#755c3e', '#5f4a32'][(R() * 3) | 0]);
+    const a = P(0, v + 0.12), b = P(1, v + 0.12);
+    ctx.strokeStyle = 'rgba(12,9,5,.5)'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); });
+  [0.22, 0.52, 0.82].forEach(u0 => { if (R() < 0.22) return; const u = u0 + (R() - 0.5) * 0.08;
+    quad(u, 0, u + 0.075, 1, '#3d2f1e');
+    const a = P(u, 0), b = P(u, 1);
+    ctx.strokeStyle = 'rgba(150,124,86,.22)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); });
+  const gy0 = Math.min(y1, y2, y3, y4), gy1 = Math.max(y1, y2, y3, y4);
+  const gr = ctx.createLinearGradient(0, gy0, 0, gy1);
+  gr.addColorStop(0, 'rgba(24,17,10,.08)'); gr.addColorStop(1, 'rgba(6,4,2,.30)');
   poly([[x1, y1], [x2, y2], [x3, y3], [x4, y4]], gr);
-  poly([[x1, y1], [x2, y2], [x3, y3], [x4, y4]], 'rgba(48,36,20,.24)');
-  const GR = mulberry32(((key * 977) | 0) >>> 0 || 1);
-  for (let i = 0; i < 5; i++){ const u = GR(), v = GR();
-    const px3 = lerp(lerp(x1, x2, u), lerp(x4, x3, u), v), py3 = lerp(lerp(y1, y2, u), lerp(y4, y3, u), v);
+  const flip = y4 < y1;   // drawNearFace passes its top edge as (x4,y4)-(x3,y3)
+  const GR = mulberry32(((key * 613) | 0) >>> 0 || 1);
+  for (let i = 0; i < 5; i++){ let v = 0.55 + GR() * 0.45; if (flip) v = 1 - v; const pt = P(GR(), v);
     ctx.fillStyle = 'rgba(8,6,3,' + (0.05 + GR() * 0.08).toFixed(2) + ')';
-    ctx.beginPath(); ctx.ellipse(px3, py3, 4 + GR() * 9, 2 + GR() * 4, 0, 0, 6.29); ctx.fill(); }
+    ctx.beginPath(); ctx.ellipse(pt[0], pt[1], 4 + GR() * 9, 2 + GR() * 4, 0, 0, 6.29); ctx.fill(); }
+  const T0 = flip ? [x4, y4] : [x1, y1], T1 = flip ? [x3, y3] : [x2, y2];
+  ctx.strokeStyle = 'rgba(168,140,96,.42)'; ctx.lineWidth = 1.3;
+  ctx.beginPath(); ctx.moveTo(T0[0], T0[1]); ctx.lineTo(lerp(T0[0], T1[0], 0.42), lerp(T0[1], T1[1], 0.42)); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(lerp(T0[0], T1[0], 0.58), lerp(T0[1], T1[1], 0.58)); ctx.lineTo(T1[0], T1[1]); ctx.stroke();
 }
 function drawNearFace(f){
   const A = [isoX(f.gx, f.gy + 1), isoY(f.gx, f.gy + 1, 0)], B = [isoX(f.gx + 1, f.gy + 1), isoY(f.gx + 1, f.gy + 1, 0)];
   const B2 = [isoX(f.gx + 1, f.gy + 1), isoY(f.gx + 1, f.gy + 1, f.z)], A2 = [isoX(f.gx, f.gy + 1), isoY(f.gx, f.gy + 1, f.z)];
   paintWallTexture(A[0], A[1], B[0], B[1], B2[0], B2[1], A2[0], A2[1], f.gx * 3.1 + f.gy * 7.7);
-  ctx.fillStyle = 'rgba(10,8,5,0.26)';   // shadow gathers under the lip: the wall reads as depth, not decoration
+  ctx.fillStyle = 'rgba(10,8,5,0.18)';   // shadow gathers under the lip: the wall reads as depth, not decoration
   ctx.beginPath(); ctx.moveTo(A[0], A[1]); ctx.lineTo(B[0], B[1]);
   ctx.lineTo(lerp(B[0], B2[0], 0.34), lerp(B[1], B2[1], 0.34)); ctx.lineTo(lerp(A[0], A2[0], 0.34), lerp(A[1], A2[1], 0.34));
   ctx.closePath(); ctx.fill();
-  [[0.3, 0.07], [0.2, 0.15], [0.1, 0.26]].forEach(([d, a]) => {
+  [[0.3, 0.05], [0.2, 0.10], [0.1, 0.17]].forEach(([d, a]) => {
     const C = [isoX(f.gx, f.gy + 1 - d), isoY(f.gx, f.gy + 1 - d, f.z)], D = [isoX(f.gx + 1, f.gy + 1 - d), isoY(f.gx + 1, f.gy + 1 - d, f.z)];
     ctx.fillStyle = 'rgba(5,4,2,' + a + ')';
     ctx.beginPath(); ctx.moveTo(A2[0], A2[1]); ctx.lineTo(B2[0], B2[1]); ctx.lineTo(D[0], D[1]); ctx.lineTo(C[0], C[1]); ctx.closePath(); ctx.fill(); });
   const h1 = hash2(f.gx * 3.1 + 40, f.gy * 7.7), h2 = hash2(f.gx * 1.3, f.gy * 5.9 + 8), h3 = hash2(f.gx * 9.4, f.gy * 2.2 + 3);
-  ctx.strokeStyle = 'rgba(110,86,54,.55)'; ctx.lineWidth = 1.2 + h1 * 0.5;
-  [0.33 + h1 * 0.13, 0.63 + h2 * 0.15].forEach(k => { ctx.beginPath();
-    ctx.moveTo(lerp(A[0], A2[0], k), lerp(A[1], A2[1], k)); ctx.lineTo(lerp(B[0], B2[0], k), lerp(B[1], B2[1], k)); ctx.stroke(); });
-  ctx.strokeStyle = 'rgba(20,14,8,.34)'; ctx.lineWidth = 2 + h3 * 1.6;
-  [0.22 + h2 * 0.2, 0.58 + h3 * 0.24].forEach(u => { ctx.beginPath();
-    ctx.moveTo(lerp(A[0], B[0], u), lerp(A[1], B[1], u)); ctx.lineTo(lerp(A2[0], B2[0], u), lerp(A2[1], B2[1], u)); ctx.stroke(); });
   ctx.strokeStyle = 'rgba(12,9,5,.16)'; ctx.lineWidth = 3.4;
   [0.12 + h1 * 0.3, 0.5 + h2 * 0.34].forEach(u => { const sx2 = lerp(A[0], B[0], u), sy2 = lerp(A[1], B[1], u);
     ctx.beginPath(); ctx.moveTo(sx2, sy2); ctx.lineTo(lerp(sx2, lerp(A2[0], B2[0], u), 0.55 + h3 * 0.3), lerp(sy2, lerp(A2[1], B2[1], u), 0.55 + h3 * 0.3)); ctx.stroke(); });
@@ -566,19 +577,19 @@ function paintTileShapes(gx, gy){
       ctx.beginPath(); ctx.ellipse(cx + Math.cos(a) * d, cy + Math.sin(a) * d * 0.42, 1.4 + R() * 2.4, 0.8 + R() * 1.1, 0, 0, 6.29); ctx.fill(); }
     return; }
   if (trenchLike(t)){
-    const base = t.type === 'dug' ? 'rgba(24,19,14,1)' : t.type === 'etrench' ? 'rgba(28,22,16,1)' : 'rgba(30,23,16,1)';
+    const base = t.type === 'dug' ? 'rgba(43,34,22,1)' : t.type === 'etrench' ? 'rgba(34,27,19,1)' : 'rgba(37,29,19,1)';
     if (t.type === 'dug') poly(diamond(gx, gy, t.z, -0.36), base);                   // rooms fuse into one dark floor
     ctx.lineCap = 'round';
     [[1, 0], [0, 1], [1, 1], [1, -1]].forEach(([dx, dy]) => { const n = tileAt(gx + dx, gy + dy); if (!trenchLike(n)) return;
       ctx.strokeStyle = base; ctx.lineWidth = 35;
       ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(isoX(gx + dx + 0.5, gy + dy + 0.5), isoY(gx + dx + 0.5, gy + dy + 0.5, n.z)); ctx.stroke(); });
     [[1, 0], [0, 1], [1, 1], [1, -1]].forEach(([dx, dy]) => { const n = tileAt(gx + dx, gy + dy); if (!trenchLike(n)) return;
-      ctx.strokeStyle = t.type === 'dug' ? 'rgba(13,10,7,.76)' : 'rgba(13,10,7,.88)'; ctx.lineWidth = 19;
+      ctx.strokeStyle = t.type === 'dug' ? 'rgba(22,17,11,.7)' : 'rgba(17,13,8,.82)'; ctx.lineWidth = 19;
       ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(isoX(gx + dx + 0.5, gy + dy + 0.5), isoY(gx + dx + 0.5, gy + dy + 0.5, n.z)); ctx.stroke(); });
     { /* material, not fill: churned earth worked into the floor — grain, tone, scuff, hashed per tile */
       const FR = mulberry32((gx * 731 + gy * 197 + 11) | 0), dia = t.type === 'dug' ? diamond(gx, gy, t.z, -0.36) : diamond(gx, gy, t.z);
       ctx.save(); ctx.beginPath(); dia.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.closePath(); ctx.clip();
-      ctx.fillStyle = ['rgba(74,60,40,.16)', 'rgba(52,42,28,.18)', 'rgba(88,72,48,.13)', 'rgba(40,32,20,.2)'][(FR() * 4) | 0];
+      ctx.fillStyle = ['rgba(88,70,46,.17)', 'rgba(62,50,34,.18)', 'rgba(102,84,56,.14)', 'rgba(50,40,26,.2)'][(FR() * 4) | 0];
       ctx.fillRect(cx - 34, cy - 20, 68, 40);
       for (let i = 0; i < 3; i++){ ctx.fillStyle = ['rgba(96,78,50,.07)', 'rgba(30,24,16,.08)', 'rgba(120,96,60,.05)'][(FR() * 3) | 0];
         ctx.beginPath(); ctx.ellipse(cx + (FR() - 0.5) * 36, cy + (FR() - 0.5) * 16, 9 + FR() * 12, 4 + FR() * 5, FR() * 0.5, 0, 6.29); ctx.fill(); }
@@ -588,16 +599,20 @@ function paintTileShapes(gx, gy){
       for (let i = 0; i < 8; i++){ ctx.fillStyle = 'rgba(10,8,5,' + (0.06 + FR() * 0.08).toFixed(2) + ')';
         ctx.beginPath(); ctx.ellipse(cx + (FR() - 0.5) * 48, cy + (FR() - 0.5) * 22, 3 + FR() * 7, 1.4 + FR() * 2.4, FR() * 0.6, 0, 6.29); ctx.fill(); }
       ctx.restore(); }
+    if (t.type === 'dug'){ const dia2 = diamond(gx, gy, t.z, -0.36);
+      ctx.save(); ctx.beginPath(); dia2.forEach((p2, i) => i ? ctx.lineTo(p2[0], p2[1]) : ctx.moveTo(p2[0], p2[1])); ctx.closePath(); ctx.clip();
+      ctx.strokeStyle = 'rgba(16,11,6,.38)'; ctx.lineWidth = 1.1;
+      [0.32, 0.56, 0.8].forEach(v => { const a = [isoX(gx + 0.05, gy + v), isoY(gx + 0.05, gy + v, t.z)], b = [isoX(gx + 0.95, gy + v), isoY(gx + 0.95, gy + v, t.z)];
+        ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); });
+      ctx.strokeStyle = 'rgba(150,124,86,.13)';
+      [0.44, 0.68].forEach(v => { const a = [isoX(gx + 0.05, gy + v), isoY(gx + 0.05, gy + v, t.z)], b = [isoX(gx + 0.95, gy + v), isoY(gx + 0.95, gy + v, t.z)];
+        ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); });
+      ctx.restore(); }
     /* the far inner wall: where the trench meets higher ground, a vertical earth face
        with timber revetment. This is the depth cue: floor, wall, lip, in that order. */
     const wallFace = (x1, y1, x2, y2, x3, y3, x4, y4) => {
       paintWallTexture(x1, y1, x2, y2, x3, y3, x4, y4, gx * 3.1 + gy * 7.7);
       const wh1 = hash2(gx * 3.1 + 40, gy * 7.7), wh2 = hash2(gx * 1.3, gy * 5.9 + 8);
-      ctx.strokeStyle = 'rgba(110,86,54,.6)'; ctx.lineWidth = 1.3 + wh1 * 0.5;
-      [0.3 + wh1 * 0.14, 0.62 + wh2 * 0.14].forEach(k => { ctx.beginPath();
-        ctx.moveTo(lerp(x1, x4, k), lerp(y1, y4, k)); ctx.lineTo(lerp(x2, x3, k), lerp(y2, y3, k)); ctx.stroke(); });
-      ctx.strokeStyle = 'rgba(150,124,86,.4)'; ctx.lineWidth = 1.1;
-      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(lerp(x1, x2, 0.5), lerp(y1, y2, 0.5) + (wh1 - 0.5) * 2.2); ctx.lineTo(x2, y2); ctx.stroke();
       ctx.fillStyle = 'rgba(122,100,66,.35)';
       ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.lineTo(x2, y2 - 3.4); ctx.lineTo(x1, y1 - 3.4); ctx.closePath(); ctx.fill(); };
     const nN = tileAt(gx, gy - 1);
@@ -619,11 +634,13 @@ function paintTileShapes(gx, gy){
       ctx.strokeStyle = 'rgba(96,74,48,.4)'; ctx.lineWidth = 2.2;
       ctx.beginPath(); ctx.moveTo(cx - 6, cy - 2.6); ctx.lineTo(cx + 6, cy + 2.6); ctx.stroke(); }
     if (t.type === 'trench' && gy === trenchY(gx)){                                  // the sandbag lip faces the enemy
-      ctx.fillStyle = '#5d5140';
       const bagRows = 1 + (t.parapet || 0);
       for (let r = 0; r < bagRows; r++) for (let i = 0; i < 5; i++){ if (hash2(gx * 3.7, i * 9.1 + r * 3.7) < 0.22) continue;
-        const bx = cx - 16 + i * 7.6 + hash2(gx, i * 3.3 + r) * 3;
-        ctx.beginPath(); ctx.ellipse(bx, cy - 15.2 - r * 3.1 + hash2(i * 1.7, gy + r) * 2.2, 4.3, 1.6, 0, 0, 6.29); ctx.fill(); } }
+        const bx = cx - 16 + i * 7.6 + hash2(gx, i * 3.3 + r) * 3, by = cy - 15.2 - r * 3.1 + hash2(i * 1.7, gy + r) * 2.2;
+        ctx.fillStyle = 'rgba(10,8,5,.35)';
+        ctx.beginPath(); ctx.ellipse(bx, by + 1.3, 4.3, 1.6, 0, 0, 6.29); ctx.fill();
+        ctx.fillStyle = ['#6a5c46', '#5d5140', '#71634c'][(hash2(gx * 5.3, i * 7.7 + r * 2.9) * 3) | 0];
+        ctx.beginPath(); ctx.ellipse(bx, by, 4.3, 1.6, 0, 0, 6.29); ctx.fill(); } }
     if (t.type === 'trench' && t.recess){                                  // the ammunition recess: crates in a dug alcove
       ctx.fillStyle = 'rgba(30,22,14,.55)'; ctx.beginPath(); ctx.ellipse(cx + 8, cy - 10, 9, 3.6, 0, 0, 6.29); ctx.fill();
       ctx.fillStyle = '#6b543a'; ctx.fillRect(cx + 3, cy - 14, 9, 5);
