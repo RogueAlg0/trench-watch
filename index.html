@@ -3424,6 +3424,48 @@ function postTick(dt){
     if (displaced) goTo(s, px, py, { act: 'post', step: true, scramble: true });
   }
 }
+const CHARGE_WORD = { theft: 'theft from the stores', scuffle: 'scuffling', drunk: 'drunk and scuffling', foul: 'a rifle let foul', doze: 'sleeping at his post' };
+function raiseCharge(s, kind, witnesses){
+  if (!s || s.dead || s.enemy || s.trade === 'officer') return;
+  if (s.charge && !s.charge.heard) return;
+  s.charge = { id: s.id, kind, t: sim.t, day: Math.floor(sim.t / DAY_LEN) + 1, witnesses: witnesses || 0, heard: false };
+  sim.charges.push(s.charge); if (sim.charges.length > 60) sim.charges.shift();
+  logEvent('orders', cap1(describeMan(s)) + ' is put on a charge: ' + CHARGE_WORD[kind] + '.'); }
+function punish(s, days){
+  s.fatigueDuty = Math.max(s.fatigueDuty || 0, sim.t + days * DAY_LEN);
+  s.offences = (s.offences || 0) + 1; }
+function ordersTick(){
+  const day = Math.floor(sim.t / DAY_LEN);
+  if (sim.hour > 6.05 && sim.hour < 6.6 && sim.ordersDay !== day && !sim.raid.active){
+    sim.ordersDay = day;
+    sim.soldiers.forEach(m => { const c = m.charge;
+      if (!c || c.heard || m.dead) return;
+      const minor = c.kind === 'scuffle' || c.kind === 'drunk' || c.kind === 'doze' || (c.kind === 'foul' && !(m.offences > 0));
+      if (!minor) return;
+      c.heard = true; m.charge = null;
+      punish(m, c.kind === 'foul' ? 0.4 : 0.6);
+      logEvent('orders', cap1(describeMan(m)) + ' answers to his sergeant for ' + CHARGE_WORD[c.kind] + ', and takes fatigues.'); }); }
+  if (sim.hour > 8.5 && sim.hour < 9.2 && sim.roomDay !== day && !sim.raid.active && !sim.ordersVerdict){
+    const up = sim.soldiers.filter(m => m.charge && !m.charge.heard && !m.dead);
+    if (up.length){ const acc = up[0];
+      const off = sim.soldiers.find(o => !o.dead && !o.enemy && o.trade === 'officer');
+      const sgt = sim.soldiers.find(o => !o.dead && !o.enemy && o.trade === 'sergeant' && sectorOfX(o.fx) === sectorOfX(acc.fx)) || sim.soldiers.find(o => !o.dead && !o.enemy && o.trade === 'sergeant');
+      if (off && sgt && acc !== off){ sim.roomDay = day;
+        startGather('orders', [56, 36], [off, sgt, acc], 26);
+        sim.ordersVerdict = { at: sim.t + 30, id: acc.id, kind: acc.charge.kind, witnesses: acc.charge.witnesses };
+        logEvent('orders', 'The orderly room sits at the HQ yard. ' + cap1(describeMan(acc)) + ' is marched in.'); } } }
+  if (sim.ordersVerdict && sim.t >= sim.ordersVerdict.at){
+    const V = sim.ordersVerdict; sim.ordersVerdict = null;
+    const m = sim.soldiers.find(x => x.id === V.id);
+    if (m && !m.dead && m.charge){ const c = m.charge; c.heard = true; m.charge = null;
+      const wrongful = rng() < (V.witnesses <= 1 ? 0.25 : 0.08);
+      punish(m, V.kind === 'theft' ? 1.5 : 1);
+      if (wrongful){ m.grievance = Math.min(1, (m.grievance || 0) + 0.7);
+        logEvent('orders', 'The verdict goes against ' + describeMan(m) + ' on thin witness. The company thinks it hard.');
+        if (!sim.weekOrders) sim.weekOrders = { text: 'Orders: ' + describeMan(m) + ' was put on fatigues for ' + CHARGE_WORD[V.kind] + ', and the company thought it hard.' }; }
+      else { logEvent('orders', cap1(describeMan(m)) + ' is found in the wrong over ' + CHARGE_WORD[V.kind] + ', and takes fatigues.');
+        if (!sim.weekOrders) sim.weekOrders = { text: 'Orders: ' + describeMan(m) + ' was put on fatigues for ' + CHARGE_WORD[V.kind] + '.' }; } } }
+  if (rng() < 0.1) sim.soldiers.forEach(m => { if (m.grievance) m.grievance = Math.max(0, m.grievance - 0.002); }); }
 function leaderTick(dt){
   sim.leaderT = (sim.leaderT ?? 0) - dt; sim.officerT = (sim.officerT ?? 0) - dt;
   sim.confuse = sim.confuse.map(c => Math.max(0, c - dt));
@@ -3431,12 +3473,17 @@ function leaderTick(dt){
     const leaders = sim.soldiers.filter(o => !o.dead && !o.enemy && (o.trade === 'sergeant' || o.trade === 'officer') && o.state !== 'down');
     sim.soldiers.forEach(m => { if (m.dead || m.enemy) return;
       m.rallied = leaders.some(L => Math.hypot(L.fx - m.fx, L.fy - m.fy) < 7) ? 2.5 : (m.rallied || 0); });
+    if (sim.hour > 19.6 || sim.hour < 4.8 || (sim.hour > 5.6 && sim.hour < 6.8))
+      sim.soldiers.forEach(m => { if (m.dead || m.enemy || m.state !== 'watch' || (m.fat || 0) < 0.55) return;
+        if ((m.dozeCd || 0) > sim.t) return; m.dozeCd = sim.t + 300;
+        if (leaders.some(L => Math.hypot(L.fx - m.fx, L.fy - m.fy) < 7) && rng() < 0.3) raiseCharge(m, 'doze', 1); });
     leaders.filter(L => L.trade === 'sergeant').forEach(L => { if (L.path || L.job || L.supplyJob || L.talk || L.gatherId || L.state === 'watch') return;
       let worst = null, ws = 0.6;
       sim.soldiers.forEach(m => { if (m.dead || m.enemy || m === L || m.state === 'down') return;
         if (sectorOfX(m.fx) !== sectorOfX(L.fx)) return;
         const score = (m.supp || 0) + (m.broke ? 0.5 : 0); if (score > ws){ ws = score; worst = m; } });
       if (worst) goTo(L, Math.floor(worst.fx), Math.floor(worst.fy), { state: 'walk' }); }); }
+  ordersTick();
   if (sim.officerT <= 0){ sim.officerT = 10;
     const off = sim.soldiers.find(o => !o.dead && !o.enemy && o.trade === 'officer' && o.state !== 'down');
     if (off && !off.path && !off.job && !off.talk && off.state !== 'watch'){
@@ -3735,7 +3782,7 @@ function updateSoldier(s, dt){
     else { const sp = s.gatherSlot || [G.cx, G.cy];
       if (Math.hypot(sp[0] - s.fx, sp[1] - s.fy) > 0.85){ if (!s.path) goTo(s, Math.floor(sp[0]), Math.floor(sp[1]), {}); }
       else { faceToward(s, G.cx, G.cy);
-        if (!s.vig || s.vig.t <= 0) s.vig = { pose: G.kind === 'cards' ? (rng() < 0.6 ? 'sit' : 'cards') : G.kind === 'rum' ? pick(['stand', 'cook', 'point']) : pick(['point', 'stand', 'cards']), t: rr(2, 4) }; }
+        if (!s.vig || s.vig.t <= 0) s.vig = { pose: G.kind === 'orders' ? 'attention' : G.kind === 'cards' ? (rng() < 0.6 ? 'sit' : 'cards') : G.kind === 'rum' ? pick(['stand', 'cook', 'point']) : pick(['point', 'stand', 'cards']), t: rr(2, 4) }; }
       return; } }
   if (s.sawJob !== undefined && s.sawJob !== null){
     if (s.dead || s.state === 'down'){ s.sawJob = undefined; s.sawReady = false; }
@@ -3850,7 +3897,7 @@ function updateSoldier(s, dt){
           const jam = s.rifle.foul > 0.6 && rng() < 0.35;
           cyc.stage = s.shots % 5 === 0 ? 'reload' : 'bolt';
           cyc.t = cyc.stage === 'reload' ? rr(0.9, 1.4) : (s.rifle.foul > 0.5 ? rr(0.9, 1.5) : rr(0.35, 0.65)) + (jam ? rr(1.4, 2.4) : 0);
-          if (jam) s.jumpy = Math.max(s.jumpy, 260); } } }
+          if (jam){ s.jumpy = Math.max(s.jumpy, 260); if (s.rifle.foul > 0.75 && !s.enemy) raiseCharge(s, 'foul', 1); } } } }
     else if (cyc.stage === 'bolt'){ s.vig = { pose: Math.floor(cyc.t * 4) % 2 ? 'boltA' : 'boltB', t: 0.18 };
       if (cyc.t <= 0){ cyc.stage = 'aim'; cyc.t = rr(1.6, 4.4) * (0.55 + (s.nerves ?? 0.8) * 0.6); } }
     else if (cyc.stage === 'reload'){ s.vig = { pose: 'reload', t: 0.18 };
@@ -4178,6 +4225,9 @@ function showMan(s){ const el = document.getElementById('manCard'); if (!el) ret
   let sub = 'Came on day ' + r.cameDay + '.';
   if (r.wounds) sub += ' Carried in ' + (r.wounds === 1 ? 'once' : r.wounds + ' times') + '.';
   if (r.deathsSeen) sub += ' Has stood over ' + (r.deathsSeen === 1 ? 'one grave' : r.deathsSeen + ' graves') + '.';
+  if (s.charge && !s.charge.heard) sub += ' Up on a charge: ' + CHARGE_WORD[s.charge.kind] + '.';
+  else if ((s.fatigueDuty || 0) > sim.t) sub += ' On fatigues.';
+  if ((s.grievance || 0) > 0.3) sub += ' He thinks his punishment was hard.';
   let rel = '';
   if (s.bond){ let bid = null, bv = 0.24; for (const k in s.bond) if (s.bond[k] > bv){ bv = s.bond[k]; bid = +k; }
     if (bid !== null){ const o = sim.soldiers.find(x => x.id === bid); if (o && !o.dead) rel = 'Closest to ' + descOfId(bid) + '.'; } }
@@ -4259,6 +4309,7 @@ function buildWeekly(live){
     if (fu.length) h += '<h3>The Wounded, and a Week Later</h3>' + fu.map(t => '<p>' + t + '</p>').join(''); }
   if (!live){ const wl = (sim.woundedLog || []).filter(w => w.t > from); sim.prevWounded = [...new Set(wl.map(w => w.id))]; sim.woundedLog = (sim.woundedLog || []).slice(-200); }
   if (colour.length){ h += '<h3>Around the Trench</h3>' + list(colour); }
+  if (sim.weekOrders){ h += '<h3>Orders</h3><p>' + sim.weekOrders.text.replace(/^Orders: /, '') + '</p>'; if (!live) sim.weekOrders = null; }
   { const ct = cardTableHTML(from); if (ct) h += ct; }
   { const notices = [];
     const brk = evs.filter(e => e.kind === 'good' && e.text.includes('comes back to himself'))[0];
@@ -4705,7 +4756,7 @@ function updateSystems(dt){
         if (sim.soldiers.some(s => s.supplyJob && s.supplyJob.to === n.to && s.supplyJob.com === n.com)) continue;
         const free = sim.soldiers.filter(s => !s.dead && !s.enemy && !s.leg && !s.gone && !s.path && !s.job && !s.supplyJob && !s.wreckJob && (s.sawJob === undefined || s.sawJob === null) && !s.talk && !s.carryCas && !s.followJob && !s.patrol && !sim.queue.includes(s.id) &&
           s.state !== 'down' && s.state !== 'sleep' && s.state !== 'watch' && (s.trade === 'carrier' || s.trade === 'rifle' || s.trade === 'sapper'))
-          .sort((a, b) => (b.trade === 'carrier' ? 1 : 0) - (a.trade === 'carrier' ? 1 : 0))[0];
+          .sort((a, b) => (((b.fatigueDuty || 0) > sim.t) - ((a.fatigueDuty || 0) > sim.t)) || ((b.trade === 'carrier' ? 1 : 0) - (a.trade === 'carrier' ? 1 : 0)))[0];
         if (free){ free.supplyJob = { com: n.com, qty: n.qty, from: 'depot', to: n.to, phase: 'fetch' }; setState(free, 'idle', 0.2); } } } }
   /* reports crawl back to HQ, when they crawl at all. The officer's war is only ever made of these. */
   sim.repT = (sim.repT ?? 30) - dt;
@@ -4966,7 +5017,7 @@ function dramaBeat(){
       const dirty = pool.filter(s => s.rifle.foul > 0.55);
       const man = dirty.length ? pick(dirty) : (pool.length && rng() < 0.4 ? pick(pool) : null);
       if (man){ goTo(sgt, Math.floor(man.fx), Math.floor(man.fy), {});
-        if (man.rifle.foul > 0.55){ man.rifle.foul = Math.max(0.1, man.rifle.foul - 0.5);
+        if (man.rifle.foul > 0.55){ if (man.rifle.foul > 0.85) raiseCharge(man, 'foul', 1); man.rifle.foul = Math.max(0.1, man.rifle.foul - 0.5);
           man.vig = { pose: 'clean', full: true, t: rr(3, 5) };
           recordSeen('shame', man.id, man.fx, man.fy, 6);
           logEvent('inspection', describeMan(sgt) + ' sends ' + describeMan(man) + ' to clean a filthy rifle.'); }
@@ -4980,6 +5031,8 @@ function dramaBeat(){
         a.jumpy = Math.max(a.jumpy, 300); b.jumpy = Math.max(b.jumpy, 300);
         recordSeen('scuffle', a.id, a.fx, a.fy, 7);
         logEvent('scuffle', describeMan(a) + ' and ' + describeMan(b) + ' have to be pulled apart.');
+        const rk = (a.gatherId && (sim.social.find(g => g.id === a.gatherId) || {}).kind === 'rum') ? 'drunk' : 'scuffle';
+        raiseCharge(a, rk, 2); raiseCharge(b, rk, 2);
         return; } }
     return; }
   if (roll < 0.72){ /* kindness finds the grieving man */
@@ -4995,7 +5048,9 @@ function dramaBeat(){
     const thief = pick(men.filter(s => (s.trade === 'rifle' || s.trade === 'sapper') && s.shunned <= 0));
     if (thief){ thief.shunned = rr(2600, 4200);
       recordSeen('theft', thief.id, thief.fx, thief.fy, 10);
-      logEvent('theft', 'Something is missing from a dump. Eyes turn to ' + describeMan(thief) + '.'); }
+      logEvent('theft', 'Something is missing from a dump. Eyes turn to ' + describeMan(thief) + '.');
+      const wit = sim.soldiers.filter(x => !x.dead && !x.enemy && x.id !== thief.id && Math.hypot(x.fx - thief.fx, x.fy - thief.fy) < 10).length;
+      if (wit > 0) raiseCharge(thief, 'theft', wit); }
     return; }
   /* two men at the graves */
   const grieving = men.filter(s => s.grief > 0.35 && !s.path);
@@ -5565,7 +5620,7 @@ function newSim(planetName, seedStr){
     missionQ: [], emMissionQ: [], dramaT: rr(26, 44), orderT: rr(50, 90), logisticsT: 4, batteryT: 2, talkT: 6,
     cart: { active: false, fx: -6, dir: 1, t: rr(24, 44), phase: 'gone', cargo: null, vCur: 0, kind: 'A', lastKind: null },
     saw: { active: false, pair: [], t: 0, stroke: 0 },
-    social: [], socialT: 5, rumDay: -1, mailT: 260,
+    social: [], socialT: 5, rumDay: -1, mailT: 260, charges: [], ordersDay: -1, roomDay: -1, weekOrders: null, ordersVerdict: null,
     busy: new Int16Array(MW * MH), busyCost: new Uint8Array(MW * MH), busyT: 0,
     duels: [], kitty: [], cardSeq: 0,
     league: { table: {}, results: [], honours: [], season: 1, week: undefined, inSeason: true, burned: 0 },
@@ -5674,7 +5729,7 @@ function startSim(){
   if (qs.get('raid')) sim.nextRaid = Math.min(sim.nextRaid, 1);
   if (qs.get('camx')) { cam.mode = 'user'; cam.idleT = -9999; cam.x = parseFloat(qs.get('camx')); cam.y = parseFloat(qs.get('camy') || '330');
     cam.zoom = parseFloat(qs.get('zoom') || '1'); }
-  window.__sim = sim; window.__shotReady = true; window.__update = update; window.__buildWeekly = buildWeekly; window.__showWeekly = showWeekly; window.__findPath = findPath; window.__tileAt = tileAt; window.__goTo = goTo; window.__burst = burst; window.__siteWorks = siteWorks; window.__worksTick = worksTick; window.__think = think; window.__regenJobs = regenJobs; window.__warAudio = WarAudio; window.__w2s = w2s; window.__graveTap = graveTap; window.__pathStats = pathStats; window.__portraitURL = portraitURL; window.__bakeManBust = bakeManBust; window.__kgSprite = kgSprite; window.__kgLook = kgLook;
+  window.__sim = sim; window.__shotReady = true; window.__update = update; window.__buildWeekly = buildWeekly; window.__showWeekly = showWeekly; window.__findPath = findPath; window.__tileAt = tileAt; window.__goTo = goTo; window.__burst = burst; window.__siteWorks = siteWorks; window.__worksTick = worksTick; window.__think = think; window.__regenJobs = regenJobs; window.__warAudio = WarAudio; window.__w2s = w2s; window.__graveTap = graveTap; window.__pathStats = pathStats; window.__portraitURL = portraitURL; window.__bakeManBust = bakeManBust; window.__kgSprite = kgSprite; window.__kgLook = kgLook; window.__raiseCharge = raiseCharge;
 }
 $('dice').addEventListener('click', () => { $('seed').value = String(ri(1, 999999)); });
 $('begin').addEventListener('click', startSim);
