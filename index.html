@@ -272,7 +272,8 @@ function quietSpot(gx, gy){
    does not fit waits in the man's pendingGo and retries next update: a walk
    that starts a frame late is invisible, a 40 ms hitch is not. Governance
    applies only inside update(); direct calls (probes, setup) search plainly. */
-const PATH_CAP = 4500;          // expansions per single search
+const PATH_CAP = 6000;          // expansions per single search
+const LEG_CAP = 12000;          // leg orders (the road flow) search deeper: they are few and vital
 const PATH_BUDGET = 6000;       // expansions per update, all searches together
 const NEG_TTL = 3;              // sim-seconds a proven failure is remembered
 const NEG_TTL_CAP = 1.2;        // capped failures: remembered too, briefly (successes seen need <= ~3.9k of the cap)
@@ -371,7 +372,8 @@ function bfsPath(sx, sy, tx, ty, opts, blocked){
     const c = tileCost(t, road); cArr[idx] = c; cSeen[idx] = gen; return c; };
   hpush(heur(sx, sy), heur(sx, sy), sx, sy);
   const closed = new Set();
-  const cap = inUpdate ? Math.min(PATH_CAP, PATH_BUDGET - updExpSpent) : PATH_CAP;
+  const cap = opts.leg ? (inUpdate ? Math.min(LEG_CAP, Math.max(PATH_CAP, PATH_BUDGET - updExpSpent)) : LEG_CAP)
+    : (inUpdate ? Math.min(PATH_CAP, PATH_BUDGET - updExpSpent) : PATH_CAP);
   let expanded = 0;
   while (heap.length){ const [, , , cx, cy] = hpop();
     const cIdx = cy * MW + cx;
@@ -720,7 +722,7 @@ function lippy(gx, gy){ const t = tileAt(gx, gy); if (!t) return false;
     if (n && Math.abs(n.z - t.z) > 0.6) return true; } return false; }
 function goTo(s, gx, gy, opts){
   opts = opts || {};
-  if (inUpdate && PATH_BUDGET - updExpSpent < 200){ s.pendingGo = { gx, gy, opts, t: sim.t }; pathStats.deferred++; return false; }
+  if (inUpdate && !opts.leg && PATH_BUDGET - updExpSpent < 200){ s.pendingGo = { gx, gy, opts, t: sim.t }; pathStats.deferred++; return false; }
   let path = findPath(Math.floor(s.fx), Math.floor(s.fy), gx, gy, opts);
   if (!path && !opts.scramble && (lippy(Math.floor(s.fx), Math.floor(s.fy)) || lippy(gx, gy)))
     path = findPath(Math.floor(s.fx), Math.floor(s.fy), gx, gy, { ...opts, scramble: true });
@@ -2790,7 +2792,7 @@ function think(s){
 function directorTick(dt){
   sim.directorT -= dt; if (sim.directorT > 0) return;
   sim.directorT = rr(4, 8);
-  const free = sim.soldiers.filter(s => !s.dead && !s.enemy && !s.path && (!s.vig || s.vig.t < 4) && !s.talk && !s.job && !s.supplyJob && !s.bearerJob && !s.patrol && !s.gatherId &&
+  const free = sim.soldiers.filter(s => !s.dead && !s.enemy && !s.leg && !s.path && (!s.vig || s.vig.t < 4) && !s.talk && !s.job && !s.supplyJob && !s.bearerJob && !s.patrol && !s.gatherId &&
     s.state !== 'sleep' && s.state !== 'watch' && s.state !== 'down' && s.shunned <= 0);
   if (!free.length) return;
   /* conversations: two men, sometimes three, and what they know travels with the words */
@@ -2834,8 +2836,13 @@ function directorTick(dt){
   a.vig = { pose: a.mail > 0 ? 'read' : (rng() < 0.55 ? 'read' : 'clean'), t: rr(7, 12) }; if (a.mail > 0) a.mail--;
 }
 function arriveCarrier(s){
+  const tgt = s.leg === 'in' ? [15, 41] : [91, 50];
+  if (Math.hypot(s.fx - tgt[0], s.fy - tgt[1]) > 1.8){   /* an incidental arrival is not the leg's end */
+    goTo(s, tgt[0], tgt[1], s.leg === 'in' ? { state: 'carry', leg: true } : { act: 'despawn', leg: true });
+    if (s.leg === 'in') setState(s, 'carry', 150);
+    return; }
   if (s.leg === 'in'){ s.leg = 'out';
-    if (s.rookie){ s.rookie = false; s.role = 'rifle'; s.trade = 'rifle';
+    if (s.rookie){ s.rookie = false; s.leg = null; s.role = 'rifle'; s.trade = 'rifle';
       if (!s.deck){ s.deck = makeDeck(); s.leagueIn = !!sim.league.inSeason; }   /* a fresh deck off the road; mid-season, he waits for the next */
       const g = sim.soldiers.find(x => x.id === sim.rookieGreeter);
       s.sector = g && g.sector >= 0 ? g.sector : 1;
@@ -2843,7 +2850,7 @@ function arriveCarrier(s){
       logEvent('arrival', 'A replacement reaches the line and is claimed.');
       setState(s, 'idle', 1); return; }
     const D = sim.stocks.depot; D.food += 3; D.ammo += 4; D.shells += 3; D.timber += 3; D.water += 3;
-    goTo(s, 91, 50, { act: 'despawn' }); setState(s, 'carry', 150);
+    goTo(s, 91, 50, { act: 'despawn', leg: true }); setState(s, 'carry', 150);
   } else s.gone = true;
 }
 
@@ -4884,6 +4891,11 @@ function update(dt){
     if (s.dead || s.gone || s.path || s.state === 'down' || sim.t - pg.t > 20){ s.pendingGo = null; continue; }
     if (PATH_BUDGET - updExpSpent < 200) break;
     s.pendingGo = null; goTo(s, pg.gx, pg.gy, pg.opts); }
+  sim.legT = (sim.legT || 0) - dt;
+  if (sim.legT <= 0){ sim.legT = 2;
+    for (const s of sim.soldiers){ if (s.dead || s.gone || !s.leg || s.role !== 'carrier' || s.path || s.pendingGo || s.state === 'down') continue;
+      if (s.leg === 'in'){ goTo(s, 15, 41, { state: 'carry', leg: true }); setState(s, 'carry', 150); }
+      else goTo(s, 91, 50, { act: 'despawn', leg: true }); } }
   sim.hour = (sim.hour + dt * 24 / DAY_LEN) % 24;
   updateClimate(dt); updateEvents(dt); directorTick(dt); updateSystems(dt);
   vegTick(dt);
@@ -4894,7 +4906,7 @@ function update(dt){
   if (sim.supplyT <= 0){ sim.supplyT = rr(90, 150);
     const c = makeSoldier('carrier', [91, 50.5]); c.leg = 'in'; c.clean = 1;
     if (sim.pendingRookie){ c.rookie = true; sim.rookieGreeter = sim.pendingRookie; sim.pendingRookie = 0; }
-    sim.soldiers.push(c); goTo(c, 15, 41, { state: 'carry' }); setState(c, 'carry', 150); }
+    sim.soldiers.push(c); goTo(c, 15, 41, { state: 'carry', leg: true }); setState(c, 'carry', 150); }
   updateGunFx(dt);
   sim.soldiers.forEach(s => { feelTick(s, dt); updateSoldier(s, dt); });
   sim.soldiers = sim.soldiers.filter(s => !s.gone);
