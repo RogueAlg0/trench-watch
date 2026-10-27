@@ -4696,6 +4696,8 @@ function updateSystems(dt){
       if (cart.traceT <= 0){ cart.traceT = 0.5;
         addTrace(Math.floor(cart.fx), 50, { kind: 'r', x: cart.fx, y: 50.4, a: 0.5, r: 0.34 });
         addTrace(Math.floor(cart.fx), 51, { kind: 'r', x: cart.fx, y: 51.6, a: 0.5, r: 0.34 });
+        const rt0 = tileAt(Math.floor(cart.fx), 50), rt1 = tileAt(Math.floor(cart.fx), 51);
+        if (rt0) rt0.worn = Math.min(1, rt0.worn + 0.05); if (rt1) rt1.worn = Math.min(1, rt1.worn + 0.05);
         if (cart.vCur > 1.2) puff(cart.fx - 1.6, 51.2, 0, 3, { tint: 'dust', r: rr(4, 7), a: 0.28, life: rr(0.9, 1.6) }); }
       if (cart.phase === 'in' && cart.fx >= 14){ cart.fx = 14; cart.phase = 'unload'; cart.vCur = 0; }
       if (cart.phase === 'out' && cart.fx > 97) cart.active = false; } }
@@ -5161,9 +5163,11 @@ function vegTick(dt){
   if (sim.bendHot.size) sim.bendHot.forEach(i => { sim.bend[i] *= Math.exp(-dt * 1.5); if (sim.bend[i] < 0.03){ sim.bend[i] = 0; sim.bendHot.delete(i); } });
   for (let i = 0; i < sim.veg.length; i++){ const mx = sim.vegMax[i]; if (!mx) continue;
     const t = sim.grid[(i / MW) | 0][i % MW]; if (!t) continue;
+    if (t.worn > 0) t.worn = Math.max(0, t.worn - dt * (sim.rain > 0.3 ? 0.0006 : 0.0002));
     const target = mx * (1 - Math.min(1, t.worn || 0) * 0.85);
     if (sim.veg[i] < target) sim.veg[i] = Math.min(target, sim.veg[i] + dt * 0.0012);
     if (sim.vegScorch[i] > 0) sim.vegScorch[i] = Math.max(0, sim.vegScorch[i] - dt * 0.0008); }
+  for (let gx = 0; gx < MW; gx++) for (const gy of [50, 51]){ const t = sim.grid[gy][gx]; if (t.worn > 0) t.worn = Math.max(0, t.worn - dt * (sim.rain > 0.3 ? 0.0006 : 0.0002)); }
 }
 const tuftCache = new Map();
 /* DESKTOP PERF: the grass is baked once per tile and density, then leaned by the wind.
@@ -5194,8 +5198,23 @@ function tuftSprite(gx, gy, t, vv){
 function drawTileFx(t){
   const { gx, gy, z } = t;
   const cx = isoX(gx + 0.5, gy + 0.5), cy = isoY(gx + 0.5, gy + 0.5, z);
-  if (t.worn > 0.12){ ctx.fillStyle = `rgba(0,0,0,${t.worn * 0.13})`;
-    ctx.beginPath(); ctx.ellipse(cx, cy, 21, 7.6, 0, 0, 6.29); ctx.fill(); }
+  if (t.worn > 0.12 && t.type !== 'road'){   /* the trodden read */
+    ctx.fillStyle = `rgba(10,7,4,${(t.worn * 0.10).toFixed(3)})`;
+    ctx.beginPath(); ctx.ellipse(cx, cy, 22, 8.2, 0, 0, 6.29); ctx.fill();
+    if (t.type === 'ground' || t.type === 'path' || t.type === 'crater'){
+      ctx.fillStyle = `rgba(196,170,124,${(t.worn * 0.085).toFixed(3)})`;
+      ctx.beginPath(); ctx.ellipse(cx, cy, 14.5, 5, 0, 0, 6.29); ctx.fill();
+      if (t.worn > 0.55){ const e = tileAt(gx + 1, gy), s2 = tileAt(gx, gy + 1);   /* lanes emerge from traffic, not from the bake */
+        ctx.strokeStyle = `rgba(190,164,116,${((t.worn - 0.4) * 0.16).toFixed(3)})`; ctx.lineWidth = 5;
+        if (e && e.worn > 0.55 && e.type !== 'road'){ ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(isoX(gx + 1.5, gy + 0.5), isoY(gx + 1.5, gy + 0.5, z)); ctx.stroke(); }
+        if (s2 && s2.worn > 0.55 && s2.type !== 'road'){ ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(isoX(gx + 0.5, gy + 1.5), isoY(gx + 0.5, gy + 1.5, z)); ctx.stroke(); } }
+      if (t.worn > 0.8){ for (let i = 0; i < 3; i++){ const hx = hash2(gx * 3.3, gy * 7.1 + i * 2.7), hy = hash2(gx * 5.7 + i, gy * 2.9);   /* aprons collect debris */
+          ctx.fillStyle = i ? 'rgba(16,12,7,.35)' : 'rgba(178,150,104,.3)';
+          ctx.beginPath(); ctx.ellipse(cx + (hx - 0.5) * 30, cy + (hy - 0.5) * 11, 1.6 + hx * 1.8, 0.8 + hy * 0.7, 0, 0, 6.29); ctx.fill(); } } } }
+  if (t.type === 'road' && t.worn > 0.35){ const ra = ((t.worn - 0.35) * 0.30).toFixed(3);   /* wheel ruts: the road remembers every lorry */
+    ctx.strokeStyle = `rgba(12,9,5,${ra})`; ctx.lineWidth = 2.4;
+    for (const v of [0.38, 0.66]){ const a = [isoX(gx + 0.06, gy + v), isoY(gx + 0.06, gy + v, z)], b = [isoX(gx + 0.94, gy + v), isoY(gx + 0.94, gy + v, z)];
+      ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); } }
   if (sim.rain > 0.15 && sim.water > 2.5 && (t.type === 'trench' || t.type === 'crater')){
     const rp = (perfT * 0.9 + hash2(gx * 3.1, gy * 7.7) * 2.4) % 2.4;
     ctx.strokeStyle = 'rgba(190,205,220,' + (0.16 * (1 - rp / 2.4)).toFixed(3) + ')'; ctx.lineWidth = 1;
