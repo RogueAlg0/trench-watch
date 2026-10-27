@@ -5656,7 +5656,7 @@ function startSim(){
   if (qs.get('raid')) sim.nextRaid = Math.min(sim.nextRaid, 1);
   if (qs.get('camx')) { cam.mode = 'user'; cam.idleT = -9999; cam.x = parseFloat(qs.get('camx')); cam.y = parseFloat(qs.get('camy') || '330');
     cam.zoom = parseFloat(qs.get('zoom') || '1'); }
-  window.__sim = sim; window.__shotReady = true; window.__update = update; window.__buildWeekly = buildWeekly; window.__showWeekly = showWeekly; window.__findPath = findPath; window.__tileAt = tileAt; window.__goTo = goTo; window.__burst = burst; window.__siteWorks = siteWorks; window.__worksTick = worksTick; window.__think = think; window.__regenJobs = regenJobs; window.__warAudio = WarAudio; window.__w2s = w2s; window.__graveTap = graveTap; window.__pathStats = pathStats; window.__portraitURL = portraitURL;
+  window.__sim = sim; window.__shotReady = true; window.__update = update; window.__buildWeekly = buildWeekly; window.__showWeekly = showWeekly; window.__findPath = findPath; window.__tileAt = tileAt; window.__goTo = goTo; window.__burst = burst; window.__siteWorks = siteWorks; window.__worksTick = worksTick; window.__think = think; window.__regenJobs = regenJobs; window.__warAudio = WarAudio; window.__w2s = w2s; window.__graveTap = graveTap; window.__pathStats = pathStats; window.__portraitURL = portraitURL; window.__bakeManBust = bakeManBust;
 }
 $('dice').addEventListener('click', () => { $('seed').value = String(ri(1, 999999)); });
 $('begin').addEventListener('click', startSim);
