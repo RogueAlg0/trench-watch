@@ -3244,6 +3244,34 @@ function siteWorks(kind){
       if (ok) return { kind, tiles, stage: 1, prog: 0, need: 10, gx: tiles[1][0], gy: y,
         text: 'Sappers dig an ammunition recess into the fire bay in sector ' + 'ABC'[sim.map.sectors.indexOf(sec)] + '.' }; }
     return null; }
+  if (kind === 'link'){
+    /* the aid post's second mouth: a trench cut down from the support line to its west end */
+    { const gx = 70, y0 = supportY(gx) + 1, y1 = 36, tiles = [];
+      let ok = tileAt(gx, 37) && tileAt(gx, 37).type === 'floor';
+      for (let gy = y0; gy <= y1 && ok; gy++){ const t = tileAt(gx, gy); if (!t || t.type !== 'ground') ok = false; else tiles.push([gx, gy]); }
+      if (ok && tiles.length >= 3) return { kind, tiles, stage: 1, prog: 0, need: 14, gx, gy: 34, convType: 'trench', convZ: -1,
+        text: 'Sappers mark a second way into the aid post, down from the support line.',
+        doneText: 'The aid post has a second mouth now. Bearers come in from the west as well.' }; }
+    /* a parallel sap for one sector, front line to support line */
+    const cols = [24, 52, 66];
+    for (let ci = 0; ci < 3; ci++){ const gx = cols[(sim.worksCycle + ci) % 3];
+      const rows = []; for (let gy = 18; gy <= 33; gy++){ const t = tileAt(gx, gy); if (t && t.type === 'trench') rows.push(gy); }
+      if (!rows.length) continue;
+      const front = rows.filter(y => y < 25), sup = rows.filter(y => y >= 25);
+      if (!front.length || !sup.length) continue;
+      const y0 = Math.max(...front) + 1, y1 = Math.min(...sup) - 1, tiles = [];
+      let ok = y1 - y0 >= 3 && y1 - y0 <= 9;
+      for (let gy = y0; gy <= y1 && ok; gy++){ const t = tileAt(gx, gy); if (!t || t.type !== 'ground') ok = false; else tiles.push([gx, gy]); }
+      if (ok) return { kind, tiles, stage: 1, prog: 0, need: 16, gx, gy: y0 + 2, convType: 'trench', convZ: -1,
+        text: 'Sappers mark out a new sap in sector ' + 'ABC'[gx < 33 ? 0 : gx < 61 ? 1 : 2] + ', a second lane between the lines.',
+        doneText: 'The new sap is open in sector ' + 'ABC'[gx < 33 ? 0 : gx < 61 ? 1 : 2] + '. Two lanes run between the lines there now.' }; }
+    /* the depot apron: a paved second mouth south of the shed */
+    { const tiles = []; let ok = true;
+      for (let gx = 13; gx <= 17; gx++){ const t = tileAt(gx, 43); if (!t || t.type !== 'ground') ok = false; else tiles.push([gx, 43]); }
+      if (ok) return { kind, tiles, stage: 1, prog: 0, need: 11, gx: 15, gy: 43, convType: 'floor', convZ: 0,
+        text: 'A working party starts paving a wider mouth for the depot yard.',
+        doneText: 'The depot yard has a paved mouth, five tiles wide. The single file is gone.' }; }
+    return null; }
   const gy = 14 + ri(0, 1);
   for (let gx = 8; gx <= 80; gx++){ const tiles = [];
     let ok = true; for (let i = 0; i < 8; i++){ const t = tileAt(gx + i, gy); if (!t || t.type !== 'ground'){ ok = false; break; } tiles.push([gx + i, gy]); }
@@ -3252,13 +3280,13 @@ function siteWorks(kind){
 }
 function worksTick(){
   if (sim.raid.active || sim.stocks.depot.timber < 6 || sim.t < 500) return;
-  const kinds = ['parapet', 'dugout', 'wire', 'searchlight', 'duckboards', 'recess'];
+  const kinds = ['parapet', 'dugout', 'wire', 'searchlight', 'duckboards', 'recess', 'link'];
   if (!sim.works){ const BW = siteWorks('bay');
     if (BW){ sim.works = BW; logEvent('work', BW.text); (sim.__wlog = sim.__wlog || []).push('started bay at ' + BW.gx + ',' + BW.gy + ' t=' + Math.round(sim.t)); return; }
-    for (let k = 0; k < 6; k++){ const W = siteWorks(kinds[(sim.worksCycle + k) % 6]);
+    for (let k = 0; k < kinds.length; k++){ const W = siteWorks(kinds[(sim.worksCycle + k) % kinds.length]);
       if (W){ sim.works = W; sim.worksCycle += k + 1; logEvent('work', W.text); (sim.__wlog = sim.__wlog || []).push('started ' + W.kind + ' at ' + W.gx + ',' + W.gy + ' t=' + Math.round(sim.t)); return; } } return; }
   if (!sim.works2 && sim.t > 1600 && (sim.avgDamage || 0) < 0.05 && sim.stocks.depot.timber >= 10){
-    for (let k = 0; k < 6; k++){ const W = siteWorks(kinds[(sim.worksCycle + 2 + k) % 6]);
+    for (let k = 0; k < kinds.length; k++){ const W = siteWorks(kinds[(sim.worksCycle + 2 + k) % kinds.length]);
       if (W && W.kind !== sim.works.kind){ sim.works2 = W; logEvent('work', W.text);
         (sim.__wlog = sim.__wlog || []).push('started second ' + W.kind + ' at ' + W.gx + ',' + W.gy + ' t=' + Math.round(sim.t)); return; } } }
 }
@@ -3283,12 +3311,14 @@ function worksWork(s, j, dt){
   if (doneStage < 3){ W.stage++; (sim.__wlog = sim.__wlog || []).push(W.kind + ' stage ' + W.stage + ' at t=' + Math.round(sim.t)); return; }
   if (W.kind === 'bay'){ const t = tileAt(W.gx, W.gy); if (t){ t.bay = 1; t.boards = 1; markDirty(W.gx, W.gy); }
     if (sim.wedgeMap) sim.wedgeMap.delete(W.gx + ',' + W.gy); }
+  if (W.kind === 'link'){ W.tiles.forEach(([x, y]) => { const t = tileAt(x, y); if (t){ t.type = W.convType; t.z = W.convZ; markDirty(x, y); } }); }
   if (W.kind === 'dugout'){ W.tiles.forEach(([x, y]) => { const t = tileAt(x, y); if (t){ t.type = 'dug'; markDirty(x, y); } });
     sim.map.bunkTiles.push(W.tiles[0], W.tiles[3]);
     sim.props.push({ kind: 'bed', fx: W.tiles[0][0] + 0.5, fy: W.tiles[0][1] + 0.5, z: 0 });
     sim.props.push({ kind: 'bed', fx: W.tiles[3][0] + 0.5, fy: W.tiles[3][1] + 0.5, z: 0 });
     logEvent('work', 'The new dugout is roofed and dry. Two more bunks in the line.'); }
   else if (W.kind === 'bay') logEvent('work', 'The passing bay is dug and boarded. Two men can pass there now.');
+  else if (W.kind === 'link') logEvent('work', W.doneText);
   else if (W.kind === 'parapet') logEvent('work', 'The parapet stands a course higher where the work party finished.');
   else if (W.kind === 'duckboards') logEvent('work', 'The duckboards are down. Boots on boards instead of mud.');
   else if (W.kind === 'recess') logEvent('work', 'The new recess is stacked and ready, close to the rifles.');
@@ -5729,7 +5759,7 @@ function startSim(){
   if (qs.get('raid')) sim.nextRaid = Math.min(sim.nextRaid, 1);
   if (qs.get('camx')) { cam.mode = 'user'; cam.idleT = -9999; cam.x = parseFloat(qs.get('camx')); cam.y = parseFloat(qs.get('camy') || '330');
     cam.zoom = parseFloat(qs.get('zoom') || '1'); }
-  window.__sim = sim; window.__shotReady = true; window.__update = update; window.__buildWeekly = buildWeekly; window.__showWeekly = showWeekly; window.__findPath = findPath; window.__tileAt = tileAt; window.__goTo = goTo; window.__burst = burst; window.__siteWorks = siteWorks; window.__worksTick = worksTick; window.__think = think; window.__regenJobs = regenJobs; window.__warAudio = WarAudio; window.__w2s = w2s; window.__graveTap = graveTap; window.__pathStats = pathStats; window.__portraitURL = portraitURL; window.__bakeManBust = bakeManBust; window.__kgSprite = kgSprite; window.__kgLook = kgLook; window.__raiseCharge = raiseCharge;
+  window.__sim = sim; window.__shotReady = true; window.__update = update; window.__buildWeekly = buildWeekly; window.__showWeekly = showWeekly; window.__findPath = findPath; window.__tileAt = tileAt; window.__goTo = goTo; window.__burst = burst; window.__siteWorks = siteWorks; window.__worksTick = worksTick; window.__think = think; window.__regenJobs = regenJobs; window.__warAudio = WarAudio; window.__w2s = w2s; window.__graveTap = graveTap; window.__pathStats = pathStats; window.__portraitURL = portraitURL; window.__bakeManBust = bakeManBust; window.__kgSprite = kgSprite; window.__kgLook = kgLook; window.__raiseCharge = raiseCharge; window.__worksWork = worksWork;
 }
 $('dice').addEventListener('click', () => { $('seed').value = String(ri(1, 999999)); });
 $('begin').addEventListener('click', startSim);
