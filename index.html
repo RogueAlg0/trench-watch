@@ -335,6 +335,7 @@ function tileCost(t, trenchRoad){
     c += sim.busyCost[t.gy * MW + t.gx];   /* Phase 2: the lane remembers feet */
   if (t.bay) c -= 25;   /* a dug passing bay pulls traffic through itself */
   if (sim && sim.wireSet && sim.wireSet.has(t.gx + ',' + t.gy)) c += 700;
+  if (sim && sim.propHeavy && sim.propHeavy.has(t.gx + ',' + t.gy)) c += 80;   /* big set pieces bend routes, never block them */
   for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
     const n = tileAt(t.gx + dx, t.gy + dy);
     if (n && !walkable(n, false) && n.type !== 'etrench'){ c += 50; break; } }
@@ -3703,6 +3704,7 @@ function updateSoldier(s, dt){
   /* talk upkeep: face each other, gesture, drift close if apart */
   if (s.talk){ const o = sim.soldiers.find(x => x.id === s.talk.with);
     if (!o || o.dead || o.state === 'down' || o.state === 'sleep') s.talk = null;
+    else if (s.path){ if (o.talk && o.talk.with === s.id) o.talk = null; s.talk = null; }
     else { if (!s.path && !o.path) s.talk.t -= dt; faceToward(s, o.fx, o.fy);
       const d = Math.hypot(o.fx - s.fx, o.fy - s.fy);
       if (d > 3.4) s.talk = null;
@@ -4380,13 +4382,7 @@ function bodyMass(s){ if (s.state === 'down' || s.dead) return 3.2; if (s.state 
   return (s.carryCas || (s.supplyJob && s.supplyJob.phase === 'haul' && s.supplyJob.com === 'shells')) ? 1.8 : 1; }
 function bodyPriority(s){ return s.carryCas ? 3 : (s.state === 'run' || s.trade === 'medic' || (s.supplyJob && s.supplyJob.phase === 'haul')) ? 2 : s.path ? 1 : 0; }
 function buildStaticBodies(){
-  const B = [];
-  sim.props.forEach(p => { if (p.kind === 'trunk'){ B.push({ fx: p.fx - 0.55, fy: p.fy, r: 0.5 }, { fx: p.fx + 0.55, fy: p.fy, r: 0.5 }); return; }
-    const R = { pot: .5, stove: .42, table: .6, phone: .22, bed: .45, cratesDepot: .8, pump: .35, barrel: .4, mast: .3, crossAid: .3, screen: .5, stump: .32, tree: .34 }[p.kind];
-    if (R) B.push({ fx: p.fx, fy: p.fy, r: R }); });
-  sim.guns.forEach((g, i) => B.push({ fx: g.fx, fy: g.fy, r: 0.8, side: false, idx: i }));
-  sim.eguns.forEach((g, i) => B.push({ fx: g.fx, fy: g.fy, r: 0.8, side: true, idx: i }));
-  return B;
+  return [];
 }
 function startRag(s, vx, vy, va){ s.rag = { t: rr(0.9, 1.7), vx, vy, va, ang: rr(-0.3, 0.3) }; }
 function integrateRagdolls(dt){
@@ -5676,6 +5672,11 @@ function newSim(planetName, seedStr){
   for (let gx = 4; gx < 88; gx++) sim.trenchTiles.push([gx, trenchY(gx)]);
   sim.map.sectors.forEach(sec => { for (let gx = sec.dug[0]; gx <= sec.dug[1]; gx++) for (let gy = 22; gy <= 24; gy++) (sec.id === 'A' ? sim.dugA : sim.dugB).push([gx, gy]); });
   sim.props = buildProps();
+  sim.propHeavy = new Set();
+  sim.guns.forEach(g => sim.propHeavy.add(Math.floor(g.fx) + ',' + Math.floor(g.fy)));
+  sim.eguns.forEach(g => sim.propHeavy.add(Math.floor(g.fx) + ',' + Math.floor(g.fy)));
+  sim.props.forEach(p => { if (p.kind === 'cratesDepot') sim.propHeavy.add(Math.floor(p.fx) + ',' + Math.floor(p.fy));
+    if (p.kind === 'trunk'){ sim.propHeavy.add(Math.floor(p.fx - 0.55) + ',' + Math.floor(p.fy)); sim.propHeavy.add(Math.floor(p.fx + 0.55) + ',' + Math.floor(p.fy)); } });
   const add = (role, tile, extra) => { const s = makeSoldier(role, tile);
     s.variant = ri(0, 3); s.clean = rr(0.05, 0.5);
     if (extra) Object.assign(s, extra); sim.soldiers.push(s); return s; };
